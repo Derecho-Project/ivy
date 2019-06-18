@@ -338,19 +338,15 @@ trusted isolate nset = {
 instance map_of_replica_to_count : array(replica, count)
 function members(V:view) : nset                                              # For a view, returns its membership
 relation isActive(V:view)                                                    # True: View is in use.  False: not active
-#related invariants:
-#invariant [Def_isActive_implies_prev_active] nextview(V1, V2) & isActive(V2) -> isActive(V1)
+#related invariants: [Def_isActive_sequence] [Def_isActive_implies_prev_active]
+
+relation wasLeader(L:replica, V:view) 					     # Will be constrained by invariant to capture the notion of "was leader at some point"
+
 relation isFinal(V:view)                                                     # True: next view is active, this view is in a final state
-#related invariants:
-#invariant [Def_isFinal_implies_active] isFinal(V) -> isActive(V)
-#invariant [Def_isFinal_implies_next_active] nextview(V1, V2) & isFinal(V1) -> isActive(V2)
+#related invariants: [Def_isFinal_implies_active] [Def_isFinal_implies_next_active]
 
 relation myMajority(N:replica, S:nset, V:view)                               # S is a set that (1) N doesn't suspect  and (2) is a majority of V and (3) includes N.
-#related invariants:
-#invariant [Def_myMajority_includes_me] myMajority(N,S,V) -> nset.contains(N,S)
-#invariant [Def_myMajority_includes_my_view] myMajority(N,S,V) -> nset.contains(N,members(V))
-#invariant [Def_myMajority_no_suspicion] (myMajority(N,S,V) & nset.contains(M,S))-> ~suspected(N,N,M,V)
-#invariant [Def_myMajority_is_majority] myMajority(N,S,V) -> nset.majority(S,members(V))
+#related invariants: [Def_myMajority_includes_me] [Def_myMajority_includes_my_view] [Def_myMajority_no_suspicion] [Def_myMajority_is_majority]
 
 individual eSet : nset	       	       					     # simple empty set
 axiom ~nset.contains(N, eSet)
@@ -366,78 +362,71 @@ axiom ~nset.contains(N, eSet)
 
 
 relation suspected(O:replica, N1:replica, N2:replica, V:view)                    # In O's SST, N1 suspects N2.  This field is copied from view to view, so the view does nothing here
-#related invariants
-#invariant [Def_suspected_ignores_view] suspected(O,N1,N2,V1) -> suspected(O,N1,N2,V2)
-#invariant [Def_suspected_copied] suspected(O,N1,N2,V1) -> suspected(N1,N1,N2,V1)
+#related invariants: [Def_suspected_ignores_view] [Def_suspected_copied]
+#note: this does not imply view membership. 
 
 function last_snt_index(S:replica, V:view): count                                # S tracks how many message it has sent
 function last_rcv_index(O:replica, N:replica, S:replica, V:view) : count         # N reports how many messages it has seen from S in V via this field
-#related invariants:
-#invariant [Def_last_rcv_index_copied] last_rcv_index(O,N,S,V) >= last_rcv_index(N,N,S,V)
+#related invariants: [Def_last_rcv_index_copied] [Def_last_rcv_index_implies_membership]
 
 function min_last_rcvd(O:replica, N:replica, L:replica, S:replica, V:view) : count  # The leader computes and reports min(last_rcvd) from S.  Later, N echoes it
-#related invariants:
-#invariant [Def_min_last_rcv_copied] min_last_rcvd(O,N,L,S,V) >= min_last_rcvd(N,N,L,S,V)
-#invariant [Def_min_last_rcv_copied_from_leader] min_last_rcvd(N,N,L,S,V) >= min_last_rcvd(L,L,L,S,V)
+#related invariants: [Def_min_last_rcv_copied] [Def_min_last_rcv_copied_from_leader] [Def_min_last_rcv_implies_membership] [Def_min_last_rcv_leader_was_leader]
 
 relation adds(O:replica, N:replica, L:replica, OV:view, Q:nset)                  # Q is a set of members to add as we move to Vk+1.  The leader proposes and member N later echoes
-#related invariants:
-#invariant [Def_adds_copied] adds(O,N,L,OV,Q) -> adds(N,N,L,OV,Q)
-#invariant [Def_adds_copied_from_leader] adds(N,N,L,OV,Q) -> adds(L,L,L,OV,Q)
+#related invariants: [Def_adds_copied] [Def_adds_copied_from_leader] [Def_adds_implies_membership] [Def_adds_leader_was_leader]
 
 relation removes(O:replica, N:replica, L:replica, OV:view, Q:nset)               # ..................... to remove
-#related invariants:
-#invariant [Def_removes_copied] removes(O,N,L,OV,Q) -> removes(N,N,L,OV,Q)
-#invariant [Def_removes_copied_from_leader] removes(N,N,L,OV,Q) -> removes(L,L,L,OV,Q)
+#related invariants: [Def_removes_copied] [Def_removes_copied_from_leader] [Def_removes_implies_membership] [Def_removes_leader_was_leader]
 
 #seems strange to me that num_changes and num_committed don't have a view index.
 #I realize they are global (hold across views), but as a new view includes the creation
 #of a new SST it seems more faithful to explicitly model this copying step in an action
 #and include the view as an argument to the num_changes/num_committed functions.
 function num_changes(O:replica, N:replica, L:replica) : count                    # Number of filled in entries in the adds/removes relations
-#invariant [Def_num_changes_copied] num_changes(O,N,L) >= num_changes(N,N,L)
-#invariant [Def_num_changes_copied_from_leader] num_changes(N,N,L) => num_changes(L,L,L)
+#related invariants: [Def_num_changes_copied] [Def_num_changes_copied_from_leader] [Def_num_changes_leader_was_leader]
 
 function num_committed(O:replica, N:replica, L:replica) : count                  # Number of committed changes
-#invariant [Def_num_committed_copied] num_committed(O,N,L) >= num_committed(N,N,L)
-#invariant [Def_num_committed_copied_from_leader] num_committed(N,N,L) => num_committed(L,L,L)
+#related invariants: [Def_num_committed_copied] [Def_num_committed_copied_from_leader] [Def_num_committed_leader_was_leader]
 
 relation ragged_trim_computed(O:replica, N:replica, L:replica, V:view)           # Set when the leader reports min_last_rcvd, or when process N copies it from the leader
-#invariant [Def_ragged_trim_computed_copied] ragged_trim_computed(O, N, L, V) -> ragged_trim_computed(N, N, L, V)
-#invariant [Def_ragged_trim_computed_copied_from_leader] ragged_trim_computed(N, N, L, V) -> ragged_trim_computed(L, L, L, V)
-#invariant [Def_ragged_trim_computed_implies_membership]
-#  ragged_trim_computed(O, N, L, V) -> (nset.member(O,members(V)) & nset.member(N,members(V)) & nset.member(L,members(V)))
-#todo: this one is really weak, should figure out more precise strengthening
-#invariant [Def_ragged_trim_leader_was_leader] ragged_trim_computed(O, N, L, V) -> (woke(N,L,V) | suspected(A,B,L,V))
-
+#related invariants: [Def_ragged_trim_computed_copied] [Def_ragged_trim_computed_copied_from_leader] [Def_ragged_trim_computed_implies_membership] [Def_ragged_trim_computed_leader_was_leader]
 
 relation ragged_trim_committed(O:replica, N:replica, L:replica, V:view)          # As each process detects that everyone has the ragged trim, each reports that it has committed.
-#invariant [Def_ragged_trim_committed_copied] ragged_trim_committed(O, N, L, V) -> ragged_trim_committed(N, N, L, V)
-#invariant [Def_ragged_trim_committed_copied_from_leader] ragged_trim_committed(N, N, L, V) -> ragged_trim_committed(L, L, L, V)
-#invariant [Def_ragged_trim_committed_implies_membership]
-#  ragged_trim_committed(O, N, L, V) -> (nset.member(O,members(V)) & nset.member(N,members(V)) & nset.member(L,members(V)))
-#todo: this one is really weak, should figure out more precise strengthening
-#invariant [Def_ragged_trim_leader_was_leader] ragged_trim_committed(O, N, L, V) -> (woke(N,L,V) | suspected(A,B,L,V))
+#related invariants: [Def_ragged_trim_committed_copied] [Def_ragged_trim_committed_copied_from_leader] [Def_ragged_trim_committed_implies_membership] [Def_ragged_trim_committed_leader_was_leader]
 
 relation wedged(O:replica, N:replica, V:view)                                    # N "wedges" its SST row when it has stopped receiving messages because it knows of a pending change
-#invariant [Def_wedged_copied] wedged(O,N,V) -> wedged(N,N,V)
-#invariant [Def_wedged_implies_membership] wedged(O,N,V) -> (nset.member(O,members(V)) & nset.member(N,members(V)))
+#related invariants: [Def_wedged_copied] [Def_wedged_implies_membership] 
 
 # These next are helper state variables, but not represented in the SST
 relation leader(N:replica, L:replica, V:view)                                    # N believes L to be the leader in view V
-#need invariant saying N thinks L is the leader only when L is the leader?
+#related invariant: [Def_leader_consistent]
+
 relation woke(L: replica, V:view)                                                # N knows itself to be the next leader in V, and every process in V that isn't suspected suspects every L<N
-#invariant [Def_woke_implies_leader] woke(L,V) -> leader(L,L,V)
-#invariant [Def_woke_implies_membership] woke(L,V) -> nset.member(L,members(V))
+#related invariants: [Def_woke_implies_leader] [Def_woke_implies_membership]
 
 relation made_a_commit_decision(L:replica, V:view)                               # As leader, L made a ragged trim commit decision in V
+#related invariants: [Def_made_a_commit_decision_consistent]
+
 relation copied_a_commit_decision(N:replica, S:replica, V:view)                  # Copied a ragged trim commit decision from S
+#want invariant enforcing this was actually copied.
+
 function vn(V:view): count                                                       # Given a view, returns its count
+#related invariants: [Def_count_agrees1] [Def_count_agrees2]
+
 relation delivered(N:replica, C:count, S:replica, V:view)                        # Messages delivered in the view
+#related invariants: [Def_delivered_membership]
+
 relation done(N:replica, V:view)                                                 # Replica N is finished delivering messages in view V
+#related invariants: [Def_done_membership]
+
 relation nextview(V1:view, V2:view)                                              # View V2 was created from V1
+#related invariants: [Def_nextview_majority] [Def_nextview_counts]
+
 relation nextInSeq(C1:count, C2:count)                                           # embodies "count.next(C1)=C2"
+#related invariants: [Def_nextInSeq_irreflexive] [Def_nextInSeq_unique_successor] [Def_nextInSeq_comparators]
+
 relation viewSeq(V1:view, V2:view)                                               # embodies "vn(V1)+1 = vn(V2)"
+#related invariants: [Def_viewSeq_nextview]
 
 type pc = {f1,f2,f3,f4,f5}
 
@@ -952,26 +941,91 @@ isolate leaderVC = {
     export push_rows10
     export push_rows11
     export push_rows12
-  
-    invariant [S_nset0] nset.contains(N,0) <-> N=0
-    invariant [S_view0] members(0)=0
-    invariant [S_leader0] leader(0,0,0)
-    invariant [S_active0] isActive(0)
-    invariant [S_vn0] V=0 -> vn(V)=0
-    invariant [H_activeK] forall V1:view, V2:view. (V1<V2 & isActive(V2)) -> isActive(V1)
-    invariant [H_count1] forall C1:count, C2:count. nextInSeq(C1, C2) -> forall C3:count. ((C1 < C3 & C3 <= C2) -> C3=C2)
-    invariant [H_count2] ~nextInSeq(C, C)
-    invariant [H_viewNumbers1] forall V1:view, V2:view. viewSeq(V1, V2) <-> nextInSeq(vn(V1), vn(V2))
-    #invariant [H_viewSeq] forall V1:view, V2:view. viewSeq(V1, V2) -> (forall V3:view. viewSeq(V1, V3) -> V2=V3)
-    #invariant [H_successiveViews] (viewSeq(V1, V2) & isActive(V1) & isActive(V2)) -> nextview(V1, V2)
-    #invariant [H_vk1] (viewSeq(V0, V1) & isActive(V1)) -> nextview(V0, V1)
-    #invariant [H_existsSucc] (isActive(VKM1) & isActive(VK) & nextInSeq(vn(VKM1), vn(VK))) -> nextview(0, 1) & nextview(VKM1, VK)
+
+#Matthew's structural invariants
+
+invariant [Def_isActive_sequence] (viewSeq(V1,V2) & isActive(V2)) -> isActive(V1)
+invariant [Def_isActive_implies_prev_active] nextview(V1, V2) & isActive(V2) -> isActive(V1)
+
+invariant [Def_isFinal_implies_active] isFinal(V) -> isActive(V)
+invariant [Def_isFinal_implies_next_active] nextview(V1, V2) & isFinal(V1) -> isActive(V2)
+
+invariant [Def_myMajority_includes_me] myMajority(N,S,V) -> nset.contains(N,S)
+invariant [Def_myMajority_includes_my_view] myMajority(N,S,V) -> nset.contains(N,members(V))
+invariant [Def_myMajority_no_suspicion] (myMajority(N,S,V) & nset.contains(M,S))-> ~suspected(N,N,M,V)
+invariant [Def_myMajority_is_majority] myMajority(N,S,V) -> nset.majority(S,members(V))
+
+invariant [Def_suspected_ignores_view] suspected(O,N1,N2,V1) -> suspected(O,N1,N2,V2)
+invariant [Def_suspected_copied] suspected(O,N1,N2,V1) -> suspected(N1,N1,N2,V1)
+
+invariant [Def_last_rcv_index_copied] last_rcv_index(O,N,S,V) >= last_rcv_index(N,N,S,V)
+invariant [Def_last_rcv_index_implies_membership] (last_rcv_index(O,N,S,V) >= 0) -> (nset.contains(O,members(V)) & nset.contains(N,members(V)) & nset.contains(S,members(V)))
+
+invariant [Def_min_last_rcv_copied] min_last_rcvd(O,N,L,S,V) >= min_last_rcvd(N,N,L,S,V)
+invariant [Def_min_last_rcv_copied_from_leader] min_last_rcvd(N,N,L,S,V) >= min_last_rcvd(L,L,L,S,V)
+invariant [Def_min_last_rcv_implies_membership] (min_last_rcvd(O,N,L,S,V) >= 0) -> (nset.contains(O,members(V)) & nset.contains(N,members(V)) & nset.contains(L,members(V)) & nset.contains(S,members(V)))
+invariant [Def_min_last_rcv_leader_was_leader] (min_last_rcvd(O,N,L,S,V) >= 0) -> wasLeader(L,V)
+
+invariant [Def_adds_copied] adds(O,N,L,OV,Q) -> adds(N,N,L,OV,Q)
+invariant [Def_adds_copied_from_leader] adds(N,N,L,OV,Q) -> adds(L,L,L,OV,Q)
+invariant [Def_adds_implies_membership] adds(O,N,L,OV,Q) -> (nset.contains(O,members(OV)) & nset.contains(N,members(OV)) & nset.contains(L,members(OV)))
+invariant [Def_adds_leader_was_leader] adds(O,N,L,OV,Q) -> wasLeader(L,V)
+
+invariant [Def_removes_copied] removes(O,N,L,OV,Q) -> removes(N,N,L,OV,Q)
+invariant [Def_removes_copied_from_leader] removes(N,N,L,OV,Q) -> removes(L,L,L,OV,Q)
+invariant [Def_removes_implies_membership] removes(O,N,L,OV,Q) -> (nset.contains(O,members(OV)) & nset.contains(N,members(OV)) & nset.contains(L,members(OV)))
+invariant [Def_removes_leader_was_leader] removes(O,N,L,OV,Q) -> wasLeader(L,V)
+
+invariant [Def_num_changes_copied] num_changes(O,N,L) >= num_changes(N,N,L)
+invariant [Def_num_changes_copied_from_leader] num_changes(N,N,L) >= num_changes(L,L,L)
+invariant [Def_num_changes_leader_was_leader] (num_changes(N,N,L) >= 0) -> wasLeader(L,V)
+
+invariant [Def_num_committed_copied] num_committed(O,N,L) >= num_committed(N,N,L)
+invariant [Def_num_committed_copied_from_leader] num_committed(N,N,L) >= num_committed(L,L,L)
+invariant [Def_num_committed_leader_was_leader] (num_committed(O,N,L) >= 0) -> wasLeader(L,V)
+
+invariant [Def_ragged_trim_computed_copied] ragged_trim_computed(O, N, L, V) -> ragged_trim_computed(N, N, L, V)
+invariant [Def_ragged_trim_computed_copied_from_leader] ragged_trim_computed(N, N, L, V) -> ragged_trim_computed(L, L, L, V)
+invariant [Def_ragged_trim_computed_implies_membership] ragged_trim_computed(O, N, L, V) -> (nset.contains(O,members(V)) & nset.contains(N,members(V)) & nset.contains(L,members(V)))
+invariant [Def_ragged_trim_computed_leader_was_leader] ragged_trim_computed(O, N, L, V) -> wasLeader(L,V)
+
+invariant [Def_ragged_trim_committed_copied] ragged_trim_committed(O, N, L, V) -> ragged_trim_committed(N, N, L, V)
+invariant [Def_ragged_trim_committed_copied_from_leader] ragged_trim_committed(N, N, L, V) -> ragged_trim_committed(L, L, L, V)
+invariant [Def_ragged_trim_committed_implies_membership] ragged_trim_committed(O, N, L, V) -> (nset.contains(O,members(V)) & nset.contains(N,members(V)) & nset.contains(L,members(V)))
+invariant [Def_ragged_trim_committed_leader_was_leader] ragged_trim_committed(O, N, L, V) -> wasLeader(L,V)
+
+invariant [Def_wedged_copied] wedged(O,N,V) -> wedged(N,N,V)
+invariant [Def_wedged_implies_membership] wedged(O,N,V) -> (nset.contains(O,members(V)) & nset.contains(N,members(V)))
+
+invariant [Def_leader_consistent] leader(N,L,V) -> wasLeader(L,V)
+
+invariant [Def_woke_implies_leader] woke(L,V) -> leader(L,L,V)
+invariant [Def_woke_implies_membership] woke(L,V) -> nset.contains(L,members(V))
+
+invariant [Def_made_a_commit_decision_consistent] made_a_commit_decision(L,V) -> wasLeader(L,V)
+
+invariant [Def_count_agrees1] (V1 < V2) <-> (vn(V1) < vn(V2))
+invariant [Def_count_agrees2] (V1 = V2) <-> (vn(V1) = vn(V2))
+
+invariant [Def_delivered_membership] delivered(N,C,S,V) -> (nset.contains(N,members(V)) & nset.contains(S,members(V)))
+
+invariant [Def_done_membership] done(N,V) -> nset.contains(N, members(V))
+
+invariant [Def_nextview_majority] exists S. nset.majority(S,members(V1)) & nset.majority(S,members(V2))
+invariant [Def_nextview_counts] nextview(V1,V2) -> nextInSeq(vn(V1),vn(V2))
+
+invariant [Def_nextInSeq_irreflexive] ~nextInSeq(C,C)
+invariant [Def_nextInSeq_unique_successor] nextInSeq(C,C1) & nextInSeq(C,C2) -> C1 = C2
+invariant [Def_nextInSeq_comparators] nextInSeq(C,C1) -> C < C1
+
+invariant [Def_viewSeq_nextview] viewSeq(V1,V2) -> nextview(V1,V2)
+
+#existing structural invariants
     invariant [H_addsPfun] adds(O, N, L, V, Q1) & adds(O, N, L, V, Q2) -> Q1 = Q2
     invariant [H_removesPfun] removes(O, N, L, V, Q1) & removes(O, N, L, V, Q2) -> Q1 = Q2
     invariant [H_addsAdvance] adds(O, N, L, V, Q) -> ((nset.contains(P, Q) & nset.contains(R, members(V))) -> P>R)
     invariant [H_transitiveActive] (V1 < V2 & V2 < V3 & isActive(V1) & isActive(V3)) 
                                            -> isActive(V2)
-    #invariant [H_leaderIsInTheView] leader(N, L, V) -> nset.contains(L, members(V))
     invariant [H_onlyOneLeader] (isActive(V) & nset.contains(N, members(V)) & leader(N, L1, V) & leader(N, L2, V))
                                            -> L1 = L2 | (L1 < L2 & suspected(N, N, L1, V)) | (L2 < L1 & suspected(N, N, L2, V))
     invariant [H_activeNodesHaveALeader] (isActive(V) & nset.contains(N, members(V)) & nset.contains(L, members(V)) & leader(N, L, V))
@@ -982,16 +1036,32 @@ isolate leaderVC = {
                                            -> N >= L | suspected(L, L, N, V)
     invariant [H_onlyLeadersAreWoke]  forall L:replica. (woke(L, V) & ~suspected(L, L, L, V))
                                            -> isActive(V) & nset.contains(L, members(V)) & leader(L, L, V)
-    invariant [H_initialLeader] nset.contains(0, members(V)) -> woke(0, V)
-
-
-
-
-    invariant [H_neverSuspectMajority] ~nset.contains(N, members(V)) | suspected(N, N, N, V) | 
+   invariant [H_neverSuspectMajority] ~nset.contains(N, members(V)) | suspected(N, N, N, V) | 
                                (myMajority(N, S, V) & nset.contains(P, S) & ~suspected(N, N, P, V))
 
+#initialization invariants
+    invariant [S_nset0] nset.contains(N,0) <-> N=0
+    invariant [S_view0] members(0)=0
+    invariant [S_leader0] leader(0,0,0)
+    invariant [S_active0] isActive(0)
+    invariant [S_vn0] V=0 -> vn(V)=0
+    invariant [H_initialLeader] nset.contains(0, members(V)) -> woke(0, V)
+
+#other invariants
 
 
+#invariants that (are likely) implied by existing + new invariants
+    #invariant [H_activeK] forall V1:view, V2:view. (V1<V2 & isActive(V2)) -> isActive(V1)
+    #invariant [H_count1] forall C1:count, C2:count. nextInSeq(C1, C2) -> forall C3:count. ((C1 < C3 & C3 <= C2) -> C3=C2)
+    #invariant [H_count2] ~nextInSeq(C, C)
+    #invariant [H_leaderIsInTheView] leader(N, L, V) -> nset.contains(L, members(V))
+
+#invariants that seem too strong / unnecessary for structural properties
+    #invariant [H_viewNumbers1] forall V1:view, V2:view. viewSeq(V1, V2) <-> nextInSeq(vn(V1), vn(V2))
+    #invariant [H_viewSeq] forall V1:view, V2:view. viewSeq(V1, V2) -> (forall V3:view. viewSeq(V1, V3) -> V2=V3)
+    #invariant [H_successiveViews] (viewSeq(V1, V2) & isActive(V1) & isActive(V2)) -> nextview(V1, V2)
+    #invariant [H_vk1] (viewSeq(V0, V1) & isActive(V1)) -> nextview(V0, V1)
+    #invariant [H_existsSucc] (isActive(VKM1) & isActive(VK) & nextInSeq(vn(VKM1), vn(VK))) -> nextview(0, 1) & nextview(VKM1, VK)
 
     invariant [H_echoMakesSense0] last_rcv_index(O, N, S, V) <= last_snt_index(S, V) & last_rcv_index(O, N, S, V) <= last_rcv_index(N, N, S, V) 
     invariant [H_echoMakesSense1] ~ragged_trim_computed(O, N, L, V) -> min_last_rcvd(O, N, L, S, V)=0
