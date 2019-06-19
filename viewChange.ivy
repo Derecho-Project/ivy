@@ -959,10 +959,10 @@ invariant [Def_isFinal_implies_active] isFinal(V) -> isActive(V)
 
 invariant [Def_myMajority_includes_me] myMajority(N,S,V) -> nset.contains(N,S)
 invariant [Def_myMajority_includes_my_view] myMajority(N,S,V) -> nset.contains(N,members(V))
-invariant [Def_myMajority_no_suspicion] (myMajority(N,S,V) & nset.contains(M,S))-> ~suspected(N,N,M,V)
+invariant [Def_myMajority_no_suspicion] (myMajority(N,S,V) & nset.contains(M,S))-> (~suspected(N,N,M,V)|suspected(N,N,N,V))
 invariant [Def_myMajority_is_majority] myMajority(N,S,V) -> nset.majority(S,members(V))
 
-invariant [Def_suspected_ignores_view] suspected(O,N1,N2,V1) -> suspected(O,N1,N2,V2)
+invariant [Def_suspected_ignores_view] (suspected(O,N1,N2,V1) & nextview(V1,V2)) -> (suspected(O,N1,N2,V1)|suspected(O,N1,N1,V2)|suspected(O,N1,N2,V2))
 invariant [Def_suspected_copied] suspected(O,N1,N2,V1) -> suspected(N1,N1,N2,V1)
 
 invariant [Def_last_rcv_index_copied] last_rcv_index(O,N,S,V) >= last_rcv_index(N,N,S,V)
@@ -1018,7 +1018,6 @@ invariant [Def_delivered_membership] delivered(N,C,S,V) -> (nset.contains(N,memb
 
 invariant [Def_done_membership] done(N,V) -> nset.contains(N, members(V))
 
-invariant [Def_nextview_majority] exists S. nset.majority(S,members(V1)) & nset.majority(S,members(V2))
 invariant [Def_nextview_counts] nextview(V1,V2) -> nextInSeq(vn(V1),vn(V2))
 
 invariant [Def_nextInSeq_irreflexive] ~nextInSeq(C,C)
