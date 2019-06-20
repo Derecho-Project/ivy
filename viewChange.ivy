@@ -428,6 +428,8 @@ relation nextInSeq(C1:count, C2:count)                                          
 relation viewSeq(V1:view, V2:view)                                               # embodies "vn(V1)+1 = vn(V2)"
 #related invariants: [Def_viewSeq_nextview]
 
+var barf: bool
+
 type pc = {f1,f2,f3,f4,f5}
 
 isolate leaderVC = {
@@ -454,8 +456,7 @@ isolate leaderVC = {
         done(N, V) := false;
         nextview(V1, V2) := false;
         isFinal(V) := false;
-        last_rcv_index(O, N, S, V) := 0;
-        min_last_rcvd(O, N, L, S, V) := 0;
+        barf := false;
     }
 
     # Node n in view v sends a message
@@ -470,6 +471,7 @@ isolate leaderVC = {
         last_snt_index(n, v) := count.next(last_snt_index(n, v));
         # Deliver to self instantly
         last_rcv_index(n, n, n, v) := count.next(last_rcv_index(n, n, n, v));
+        barf := true;
     }
 
     # Node n in view v receives a message from sender s
@@ -953,23 +955,23 @@ isolate leaderVC = {
 #Matthew's structural invariants
 
 invariant [Def_isActive_sequence] (viewSeq(V1,V2) & isActive(V2)) -> isActive(V1)
-invariant [Def_isActive_implies_prev_active] nextview(V1, V2) & isActive(V2) -> isActive(V1)
+invariant [Def_isActive_implies_prev_active] (nextview(V1, V2) & isActive(V2)) -> isActive(V1)
 
 invariant [Def_isFinal_implies_active] isFinal(V) -> isActive(V)
 
 invariant [Def_myMajority_includes_me] myMajority(N,S,V) -> nset.contains(N,S)
 invariant [Def_myMajority_includes_my_view] myMajority(N,S,V) -> nset.contains(N,members(V))
-invariant [Def_myMajority_no_suspicion] (myMajority(N,S,V) & nset.contains(M,S))-> (~suspected(N,N,M,V)|suspected(N,N,N,V))
+invariant [Def_myMajority_no_suspicion] (myMajority(N,S,V) & nset.contains(M,S))-> ~suspected(N,N,M,V)
 invariant [Def_myMajority_is_majority] myMajority(N,S,V) -> nset.majority(S,members(V))
 
-invariant [Def_suspected_ignores_view] (suspected(O,N1,N2,V1) & nextview(V1,V2)) -> (suspected(O,N1,N2,V1)|suspected(O,N1,N1,V2)|suspected(O,N1,N2,V2))
+invariant [Def_suspected_ignores_view] (suspected(O,N1,N2,V1) & nextview(V1,V2)) -> (suspected(N1,N1,N1,V2)|suspected(O,N1,N2,V2))
 invariant [Def_suspected_copied] suspected(O,N1,N2,V1) -> suspected(N1,N1,N2,V1)
 
-invariant [Def_last_rcv_index_copied] last_rcv_index(O,N,S,V) >= last_rcv_index(N,N,S,V)
+invariant [Def_last_rcv_index_copied] last_rcv_index(O,N,S,V) <= last_rcv_index(N,N,S,V)
 invariant [Def_last_rcv_index_implies_membership] (last_rcv_index(O,N,S,V) >= 0) -> (nset.contains(O,members(V)) & nset.contains(N,members(V)) & nset.contains(S,members(V)))
 
-invariant [Def_min_last_rcv_copied] min_last_rcvd(O,N,L,S,V) >= min_last_rcvd(N,N,L,S,V)
-invariant [Def_min_last_rcv_copied_from_leader] min_last_rcvd(N,N,L,S,V) >= min_last_rcvd(L,L,L,S,V)
+invariant [Def_min_last_rcv_copied] min_last_rcvd(O,N,L,S,V) <= min_last_rcvd(N,N,L,S,V)
+invariant [Def_min_last_rcv_copied_from_leader] min_last_rcvd(N,N,L,S,V) <= min_last_rcvd(L,L,L,S,V)
 invariant [Def_min_last_rcv_implies_membership] (min_last_rcvd(O,N,L,S,V) >= 0) -> (nset.contains(O,members(V)) & nset.contains(N,members(V)) & nset.contains(L,members(V)) & nset.contains(S,members(V)))
 invariant [Def_min_last_rcv_leader_was_leader] (min_last_rcvd(O,N,L,S,V) >= 0) -> wasLeader(L,V)
 
@@ -983,12 +985,12 @@ invariant [Def_removes_copied_from_leader] removes(N,N,L,OV,Q) -> removes(L,L,L,
 invariant [Def_removes_implies_membership] removes(O,N,L,OV,Q) -> (nset.contains(O,members(OV)) & nset.contains(N,members(OV)) & nset.contains(L,members(OV)))
 invariant [Def_removes_leader_was_leader] removes(O,N,L,OV,Q) -> wasLeader(L,V)
 
-invariant [Def_num_changes_copied] num_changes(O,N,L) >= num_changes(N,N,L)
-invariant [Def_num_changes_copied_from_leader] num_changes(N,N,L) >= num_changes(L,L,L)
+invariant [Def_num_changes_copied] num_changes(O,N,L) <= num_changes(N,N,L)
+invariant [Def_num_changes_copied_from_leader] num_changes(N,N,L) <= num_changes(L,L,L)
 invariant [Def_num_changes_leader_was_leader] (num_changes(N,N,L) >= 0) -> wasLeader(L,V)
 
-invariant [Def_num_committed_copied] num_committed(O,N,L) >= num_committed(N,N,L)
-invariant [Def_num_committed_copied_from_leader] num_committed(N,N,L) >= num_committed(L,L,L)
+invariant [Def_num_committed_copied] num_committed(O,N,L) <= num_committed(N,N,L)
+invariant [Def_num_committed_copied_from_leader] num_committed(N,N,L) <= num_committed(L,L,L)
 invariant [Def_num_committed_leader_was_leader] (num_committed(O,N,L) >= 0) -> wasLeader(L,V)
 
 invariant [Def_ragged_trim_computed_copied] ragged_trim_computed(O, N, L, V) -> ragged_trim_computed(N, N, L, V)
@@ -1021,27 +1023,27 @@ invariant [Def_done_membership] done(N,V) -> nset.contains(N, members(V))
 invariant [Def_nextview_counts] nextview(V1,V2) -> nextInSeq(vn(V1),vn(V2))
 
 invariant [Def_nextInSeq_irreflexive] ~nextInSeq(C,C)
-invariant [Def_nextInSeq_unique_successor] nextInSeq(C,C1) & nextInSeq(C,C2) -> C1 = C2
+invariant [Def_nextInSeq_unique_successor] (nextInSeq(C,C1) & nextInSeq(C,C2)) -> C1 = C2
 invariant [Def_nextInSeq_comparators] nextInSeq(C,C1) -> C < C1
 
 invariant [Def_viewSeq_nextview] viewSeq(V1,V2) -> nextview(V1,V2)
 
 #existing structural invariants
-    invariant [H_addsPfun] adds(O, N, L, V, Q1) & adds(O, N, L, V, Q2) -> Q1 = Q2
-    invariant [H_removesPfun] removes(O, N, L, V, Q1) & removes(O, N, L, V, Q2) -> Q1 = Q2
+    invariant [H_addsPfun] (adds(O, N, L, V, Q1) & adds(O, N, L, V, Q2)) -> Q1 = Q2
+    invariant [H_removesPfun] (removes(O, N, L, V, Q1) & removes(O, N, L, V, Q2)) -> Q1 = Q2
     invariant [H_addsAdvance] adds(O, N, L, V, Q) -> ((nset.contains(P, Q) & nset.contains(R, members(V))) -> P>R)
     invariant [H_transitiveActive] (V1 < V2 & V2 < V3 & isActive(V1) & isActive(V3)) 
                                            -> isActive(V2)
     invariant [H_onlyOneLeader] (isActive(V) & nset.contains(N, members(V)) & leader(N, L1, V) & leader(N, L2, V))
-                                           -> L1 = L2 | (L1 < L2 & suspected(N, N, L1, V)) | (L2 < L1 & suspected(N, N, L2, V))
+                                           -> (L1 = L2 | (L1 < L2 & suspected(N, N, L1, V)) | (L2 < L1 & suspected(N, N, L2, V)))
     invariant [H_activeNodesHaveALeader] (isActive(V) & nset.contains(N, members(V)) & nset.contains(L, members(V)) & leader(N, L, V))
                                            -> (forall N2. N2 >= L | ~nset.contains(N2, members(V)) | suspected(N, N, N2, V))
     invariant [H_activeViewsOverlap] (isActive(V1) & isActive(V2) & isActive(V3) & V1 < V2 & V2 < V3 & nset.contains(N, members(V1)) & nset.contains(N, members(V3))) 
                                            -> nset.contains(N, members(V2))
     invariant [H_leadersSuspectPrior] forall L:replica, N:replica, V:view. (isActive(V) & nset.contains(L, members(V)) & nset.contains(N, members(V)) & leader(L, L, V))
-                                           -> N >= L | suspected(L, L, N, V)
+                                           -> (N >= L | suspected(L, L, N, V))
     invariant [H_onlyLeadersAreWoke]  forall L:replica. (woke(L, V) & ~suspected(L, L, L, V))
-                                           -> isActive(V) & nset.contains(L, members(V)) & leader(L, L, V)
+                                           -> (isActive(V) & nset.contains(L, members(V)) & leader(L, L, V))
 
 #initialization invariants
     invariant [S_nset0] nset.contains(N,0) <-> N=0
@@ -1050,9 +1052,6 @@ invariant [Def_viewSeq_nextview] viewSeq(V1,V2) -> nextview(V1,V2)
     invariant [S_active0] isActive(0)
     invariant [S_vn0] V=0 -> vn(V)=0
     invariant [H_initialLeader] nset.contains(0, members(V)) -> woke(0, V)
-
-#other invariants
-
 
 #invariants that (are likely) implied by existing + new invariants
     #invariant [H_activeK] forall V1:view, V2:view. (V1<V2 & isActive(V2)) -> isActive(V1)
@@ -1067,6 +1066,7 @@ invariant [Def_viewSeq_nextview] viewSeq(V1,V2) -> nextview(V1,V2)
     #invariant [H_vk1] (viewSeq(V0, V1) & isActive(V1)) -> nextview(V0, V1)
     #invariant [H_existsSucc] (isActive(VKM1) & isActive(VK) & nextInSeq(vn(VKM1), vn(VK))) -> nextview(0, 1) & nextview(VKM1, VK)
 
+#other invariants
     invariant [H_echoMakesSense0] last_rcv_index(O, N, S, V) <= last_snt_index(S, V) & last_rcv_index(O, N, S, V) <= last_rcv_index(N, N, S, V) 
     invariant [H_echoMakesSense1] ~ragged_trim_computed(O, N, L, V) -> min_last_rcvd(O, N, L, S, V)=0
     invariant [H_echoMakesSense2] ~ragged_trim_computed(O, N, L, V) | ~ragged_trim_computed(N, N, L, V) | 
@@ -1080,9 +1080,9 @@ invariant [Def_viewSeq_nextview] viewSeq(V1,V2) -> nextview(V1,V2)
     invariant [H_echoMakesSense8] ragged_trim_committed(O, N, L, V) -> (ragged_trim_committed(N, N, L, V) & ragged_trim_committed(L, L, L, V))
     invariant [H_echoMakesSense9] wedged(O, N, V) -> wedged(N, N, V)
     invariant [S_deliveredMakesSense] delivered(N, C, S, V) -> (C <= last_rcv_index(N, N, S, V))
-    invariant [H_lastRcvdMakesSense] isActive(V) & nset.contains(O, members(V)) & nset.contains(N, members(V)) & nset.contains(S, members(V)) 
-                              -> last_rcv_index(O, N, S, V)=0 | last_rcv_index(O, N, S, V)=last_rcv_index(N, N, S, V)
-    invariant [H_minMakesSense] isActive(V) & nset.contains(N, members(V)) & nset.contains(M, members(V)) & nset.contains(L, members(V)) & nset.contains(S, members(V)) 
+    invariant [H_lastRcvdMakesSense] (isActive(V) & nset.contains(O, members(V)) & nset.contains(N, members(V)) & nset.contains(S, members(V)))
+                              -> (last_rcv_index(O, N, S, V)=0 | last_rcv_index(O, N, S, V)=last_rcv_index(N, N, S, V))
+    invariant [H_minMakesSense] (isActive(V) & nset.contains(N, members(V)) & nset.contains(M, members(V)) & nset.contains(L, members(V)) & nset.contains(S, members(V)))
                                           -> (min_last_rcvd(N, M, L, S, V) <= last_rcv_index(L, L, S, V))
     invariant [H_numChangesMakesSense] (leader(N, L, V) & ~N=L & num_changes(O, N, L) >= K & K > 0) -> num_changes(L, L, L) >= K
     invariant [H_wedgedBeforeTrimComputed] ragged_trim_computed(N, N, L, V) -> (wedged(N, N, V) | suspected(N, N, N, V))
@@ -1091,11 +1091,11 @@ invariant [Def_viewSeq_nextview] viewSeq(V1,V2) -> nextview(V1,V2)
                                                                                                               -> ragged_trim_computed(L, N, N1, V)))
     invariant [H_leaderCommittedTrimFirst] forall N:replica. (~suspected(N, N, N, V) & leader(N, L, V) & ragged_trim_committed(N, N, L, V))
                               -> ragged_trim_committed(N, L, L, V)
-    invariant [S_nextViewAfterAllCommit] viewSeq(V1, V2) & isActive(V1) & isActive(V2) & nset.contains(N, members(V1)) & leader(N, L, V1) & ~suspected(L, L, N, V1)
+    invariant [S_nextViewAfterAllCommit] (viewSeq(V1, V2) & isActive(V1) & isActive(V2) & nset.contains(N, members(V1)) & leader(N, L, V1) & ~suspected(L, L, N, V1))
                               -> num_committed(N, N, L) >= vn(V1)
-    invariant [S_nextViewAfterAllTrim] viewSeq(V1, V2) & isActive(V1) & isActive(V2) & nset.contains(N, members(V1)) & leader(N1, L, V1)  & ~suspected(L, L, N1, V1)
+    invariant [S_nextViewAfterAllTrim] (viewSeq(V1, V2) & isActive(V1) & isActive(V2) & nset.contains(N, members(V1)) & leader(N1, L, V1)  & ~suspected(L, L, N1, V1))
                               -> ragged_trim_committed(N, N, L, V1)
-    invariant [H_addOrRemove] (num_changes(O, N, L) >= K & K > 0) & vn(V)=K & adds(O, N, L, V, A) & removes(O, N, L, V, R) ->
+    invariant [H_addOrRemove] ((num_changes(O, N, L) >= K & K > 0) & vn(V)=K & adds(O, N, L, V, A) & removes(O, N, L, V, R)) ->
                               (exists M. nset.contains(M, A) | nset.contains(M, R))
     invariant [H_transitiveSuspicion] suspected(N, F, F, V) -> suspected(N, N, F, V)
     invariant [H_gotCommitSomewhere] exists N:replica, S:replica, L: replica.
@@ -1114,6 +1114,6 @@ invariant [Def_viewSeq_nextview] viewSeq(V1,V2) -> nextview(V1,V2)
     invariant [S_deliverSameMsgs] (viewSeq(V1, V2) & isActive(V1) & isActive(V2) & 
                               nset.contains(N1, members(V1)) & done(N1, V1) & nset.contains(N2, members(V1)) & done(N2, V1) & isFinal(V1))
                               -> delivered(N1, C, S, V1)=delivered(N2, C, S, V1)
-    #invariant [MessWithIvy] ~isFinal(V)
+    invariant [MessWithIvy] ~barf
 
 } with nset, view, replica, count, leaderVC
