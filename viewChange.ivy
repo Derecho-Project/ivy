@@ -805,7 +805,7 @@ isolate leaderVC = {
 	assume viewSeq(ov, v);
         assume forall P. ((nset.contains(P, members(ov)) -> (nset.contains(P, members(v)) | nset.contains(P, rem))) & 
 	        (nset.contains(P, members(v)) -> (nset.contains(P, members(ov)) | nset.contains(P, add))));
-        assume forall N,P. exists S:nset. nset.contains(N, members(v)) -> (myMajority(N, S, v) & (nset.contains(P, S) -> ~suspected(N, N, P, v)));
+        #assume forall N,P. exists S:nset. nset.contains(N, members(v)) -> (myMajority(N, S, v) & (nset.contains(P, S) -> ~suspected(N, N, P, v)));
         assume ((nextview(ov, v) & isFinal(ov)) -> isActive(v));
         # This next logic computes members(ov) - remove + add
         var newmembers:nset;
@@ -834,7 +834,7 @@ isolate leaderVC = {
         if(~ (forall P. ((nset.contains(P, members(ov)) -> (nset.contains(P, members(v)) | nset.contains(P, rem))) & 
 	        (nset.contains(P, members(v)) -> (nset.contains(P, members(ov)) | nset.contains(P, add)))))) { assert_failed6 := true; };
         # There is a majority in which I believe...
-        if(~ (forall N,P. exists S:nset. nset.contains(N, members(v)) -> (myMajority(N, S, v) & (nset.contains(P, S) -> ~suspected(N, N, P, v)))) ) { assert_failed7 := true; };
+        #if(~ (forall N,P. exists S:nset. nset.contains(N, members(v)) -> (myMajority(N, S, v) & (nset.contains(P, S) -> ~suspected(N, N, P, v)))) ) { assert_failed7 := true; };
         # Hands off from one view to the next
         if(~ ((nextview(ov, v) & isFinal(ov)) -> isActive(v)) ) { assert_failed8 := true; };
     }
