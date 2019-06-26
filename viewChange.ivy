@@ -437,17 +437,18 @@ relation nextInSeq(C1:count, C2:count)                                          
 relation viewSeq(V1:view, V2:view)                                               # embodies "vn(V1)+1 = vn(V2)"
 #related invariants: [Def_viewSeq_nextview]
 
-individual assert_failed0: bool
-individual assert_failed1: bool
-individual assert_failed2: bool
-individual assert_failed3: bool
-individual assert_failed4: bool
-individual assert_failed5: bool
-individual assert_failed6: bool
-individual assert_failed7: bool
-individual assert_failed8: bool
-individual assert_failed9: bool
-individual assert_failed10: bool
+individual assert_failed_0: bool
+individual assert_failed_1: bool
+individual assert_failed_2: bool
+individual assert_failed_3: bool
+individual assert_failed_4: bool
+individual assert_failed_5: bool
+individual assert_failed_6: bool
+individual assert_failed_7: bool
+individual assert_failed_8: bool
+individual assert_failed_9: bool
+individual assert_failed_10: bool
+individual barf: bool
 
 type pc = {f1,f2,f3,f4,f5}
 
@@ -480,17 +481,18 @@ isolate leaderVC = {
         nextview(V1, V2) := false;
         isFinal(V) := false;
         nextInSeq(C1, C2) := count.succ(C1,C2);
-        assert_failed0 := false;
-        assert_failed1 := false;
-        assert_failed2 := false;
-        assert_failed3 := false;
-        assert_failed4 := false;
-        assert_failed5 := false;
-        assert_failed6 := false;
-        assert_failed7 := false;
-        assert_failed8 := false;
-        assert_failed9 := false;
-        assert_failed10 := false;
+        assert_failed_0 := false;
+        assert_failed_1 := false;
+        assert_failed_2 := false;
+        assert_failed_3 := false;
+        assert_failed_4 := false;
+        assert_failed_5 := false;
+        assert_failed_6 := false;
+        assert_failed_7 := false;
+        assert_failed_8 := false;
+        assert_failed_9 := false;
+        assert_failed_10 := false;
+        barf := false;
     }
 
     # Node n in view v sends a message
@@ -567,6 +569,7 @@ isolate leaderVC = {
             # Instead, n suspects itself ("shuts down").
             suspected(n, n, n, v) := true;
         };
+        wasLeader(n, v) := wasLeader(n, v) | leader(n, n, v);
     }
 
     # node n learns of a suspicion: node w suspects node f in view v
@@ -664,7 +667,7 @@ isolate leaderVC = {
                 # If the source had a committed trim, then this node copied a commit decision
                 copied_a_commit_decision(n, max_trim_idx, v) := ragged_trim_committed(n, n, max_trim_ldr, v);
                 # Reestablishes the invariant
-                if( ~(forall N1,N2,N3,L1,L2,V. (ragged_trim_committed(N1, N1, L1, V) & ragged_trim_committed(N2, N2, L2, V)) -> (min_last_rcvd(N1, N1, L1, N3, V) = min_last_rcvd(N2, N2, L2, N3, V))) ) { assert_failed0 := true; };
+                if( ~(forall N1,N2,N3,L1,L2,V. (ragged_trim_committed(N1, N1, L1, V) & ragged_trim_committed(N2, N2, L2, V)) -> (min_last_rcvd(N1, N1, L1, N3, V) = min_last_rcvd(N2, N2, L2, N3, V))) ) { assert_failed_0 := true; };
         };
 	woke(n, v) := true;
     }
@@ -773,10 +776,14 @@ isolate leaderVC = {
         assume woke(l, v);
         assume ragged_trim_computed(l, l, N, v);
         assume nset.contains(N, members(v)) -> suspected(l, l, N, v) | ragged_trim_computed(N, l, N, v);
-        assume forall N1,N2,L1,L2,V,N3. (ragged_trim_committed(N1, N1, L1, V) & ragged_trim_committed(N2, N2, L2, V)) -> (min_last_rcvd(N1, N1, L1, N3, V) = min_last_rcvd(N2, N2, L2, N3, V));
+        # This next sequence is a source of some concern to Ken.  
+        # Originally we had an invariant that every process commits the same ragged trim, but Ivy was hanging on it.
+        # At this point we have this much more limited assumption ("precondition"), which we check for the specific case of the decision
+        # we are about the commit, then recheck after the decision is made.  And it does pass... but is it equivalent to the old invariant?
+        assume forall N1,L,N2. (~N1=l & ragged_trim_committed(N1, N1, L, v)) -> (min_last_rcvd(l, l, l, N2, v) = min_last_rcvd(N1, N1, L, N2, v));
         ragged_trim_committed(l, l, l, v) := true;
         made_a_commit_decision(l, v) := true;
-        if(~ (forall N1,N2,L1,L2,V,N3. (ragged_trim_committed(N1, N1, L1, V) & ragged_trim_committed(N2, N2, L2, V)) -> (min_last_rcvd(N1, N1, L1, N3, V) = min_last_rcvd(N2, N2, L2, N3, V))) ) { assert_failed1 := true; }
+        if(~ (forall N1,L,N2. (~N1=l & ragged_trim_committed(N1, N1, L, v)) -> (min_last_rcvd(l, l, l, N2, v) = min_last_rcvd(N1, N1, L, N2, v))) ) { assert_failed_1 := true; }
     }
 
     # When moving from ov to v, we apply changes (by removing some processes from ov, and adding some new ones).  
@@ -813,8 +820,8 @@ isolate leaderVC = {
         assume forall N. nset.contains(N, newmembers) <-> (nset.contains(N, members(ov)) & ~nset.contains(N, rem) | nset.contains(N, add));
         members(v) := newmembers;
         # Double check...
-        if( members(ov)=members(v) ) { assert_failed2 := true; };
-        if(~ (exists N. nset.contains(N, members(v))) ) { assert_failed3 := true; };
+        if( members(ov)=members(v) ) { assert_failed_2 := true; };
+        if(~ (exists N. nset.contains(N, members(v))) ) { assert_failed_3 := true; };
         # Now, confirm that there is some majority set q from ov that is still present in the new view
         assume nset.majority(q, members(ov)) & nset.contains(N, q) -> nset.contains(N, newmembers);
         # Success!  We can activate our new view (in fact isActive is just a helper variable to enable the relevant invariants)
@@ -829,14 +836,14 @@ isolate leaderVC = {
 	isActive(v) := true;
         # These post-conditions used to be invariants but Ivy is happier with them here, as "ensure" properties
         if(~ (forall O,N1,N2,V1,V2. (suspected(O,N1,N2,V1) & nextview(V1,V2)) ->
-              (suspected(O,N1,N2,V2) | suspected(O,O,O,V1) | suspected(O,O,O,V2) | suspected(N1,N1,N1,V1) | suspected(N1,N1,N1,V2))) ) { assert_failed4 := true; };
-	if(~ viewSeq(ov, v) ) { assert_failed5 := true; };
+              (suspected(O,N1,N2,V2) | suspected(O,O,O,V1) | suspected(O,O,O,V2) | suspected(N1,N1,N1,V1) | suspected(N1,N1,N1,V2))) ) { assert_failed_4 := true; };
+	if(~ viewSeq(ov, v) ) { assert_failed_5 := true; };
         if(~ (forall P. ((nset.contains(P, members(ov)) -> (nset.contains(P, members(v)) | nset.contains(P, rem))) & 
-	        (nset.contains(P, members(v)) -> (nset.contains(P, members(ov)) | nset.contains(P, add)))))) { assert_failed6 := true; };
+	        (nset.contains(P, members(v)) -> (nset.contains(P, members(ov)) | nset.contains(P, add)))))) { assert_failed_6 := true; };
         # There is a majority in which I believe...
-        #if(~ (forall N,P. exists S:nset. nset.contains(N, members(v)) -> (myMajority(N, S, v) & (nset.contains(P, S) -> ~suspected(N, N, P, v)))) ) { assert_failed7 := true; };
+        #if(~ (forall N,P. exists S:nset. nset.contains(N, members(v)) -> (myMajority(N, S, v) & (nset.contains(P, S) -> ~suspected(N, N, P, v)))) ) { assert_failed_7 := true; };
         # Hands off from one view to the next
-        if(~ ((nextview(ov, v) & isFinal(ov)) -> isActive(v)) ) { assert_failed8 := true; };
+        if(~ ((nextview(ov, v) & isFinal(ov)) -> isActive(v)) ) { assert_failed_8 := true; };
     }
 
     # Orr came up with this idea to model the memory behavior of the RDMA SST.  
@@ -1058,6 +1065,7 @@ isolate leaderVC = {
     invariant [Def_isFinal_implies_active] isFinal(V) -> isActive(V)
 
     invariant [Def_myMajority_includes_me] (nset.contains(N, members(V)) & myMajority(N,S,V)) -> nset.contains(N,S)
+    invariant [Def_myMajority_is_in_the_view] myMajority(P,S,V) -> (nset.contains(N, S) -> nset.contains(N, members(V)))
     invariant [Def_myMajority_no_suspicion] (~suspected(N,N,N,V) & myMajority(N,S,V) & nset.contains(M,S))-> ~suspected(N,N,M,V)
     invariant [Def_myMajority_is_majority] myMajority(N,S,V) -> nset.majority(S,members(V))
 
@@ -1169,17 +1177,17 @@ isolate leaderVC = {
     #invariant [H_existsSucc] (isActive(VKM1) & isActive(VK) & nextInSeq(vn(VKM1), vn(VK))) -> nextview(0, 1) & nextview(VKM1, VK)
 
 #For properties relevent to specific actions
-    invariant [Inline_assertion_check0] assert_failed0=false
-    invariant [Inline_assertion_check1] assert_failed1=false
-    invariant [Inline_assertion_check2] assert_failed2=false
-    invariant [Inline_assertion_check3] assert_failed3=false
-    invariant [Inline_assertion_check4] assert_failed4=false
-    invariant [Inline_assertion_check5] assert_failed5=false
-    invariant [Inline_assertion_check6] assert_failed6=false
-    invariant [Inline_assertion_check7] assert_failed7=false
-    invariant [Inline_assertion_check8] assert_failed8=false
-    invariant [Inline_assertion_check9] assert_failed9=false
-    invariant [Inline_assertion_check10] assert_failed10=false
+    invariant [Inline_assertion_check_0] assert_failed_0=false
+    invariant [Inline_assertion_check_1] assert_failed_1=false
+    invariant [Inline_assertion_check_2] assert_failed_2=false
+    invariant [Inline_assertion_check_3] assert_failed_3=false
+    invariant [Inline_assertion_check_4] assert_failed_4=false
+    invariant [Inline_assertion_check_5] assert_failed_5=false
+    invariant [Inline_assertion_check_6] assert_failed_6=false
+    invariant [Inline_assertion_check_7] assert_failed_7=false
+    invariant [Inline_assertion_check_8] assert_failed_8=false
+    invariant [Inline_assertion_check_9] assert_failed_9=false
+    invariant [Inline_assertion_check_10] assert_failed_10=false
 
 #other invariants
     invariant [H_echoMakesSense2] ~ragged_trim_computed(O, N, L, V) | ~ragged_trim_computed(N, N, L, V) | 
@@ -1209,20 +1217,13 @@ isolate leaderVC = {
     invariant [H_addOrRemove] ((num_changes(O, N, L) >= K & K > 0) & vn(V)=K & adds(O, N, L, V, A) & removes(O, N, L, V, R)) ->
                               (exists M. nset.contains(M, A) | nset.contains(M, R))
     invariant [H_transitiveSuspicion] suspected(N, F, F, V) -> suspected(N, N, F, V)
-    invariant [H_gotCommitSomewhere] exists N:replica, S:replica, L: replica.
-                              ragged_trim_committed(N, N, L, V) -> ((leader(L, L, V) & made_a_commit_decision(L, V)) & 
-                              (N=L | (copied_a_commit_decision(N, S, V) & nset.contains(S, members(V)))) &
-                              nset.contains(N, members(V)) & nset.contains(L, members(V)))
-    # Ken: If Ivy really understood traces, H_trimSafety really could be an invariant.  But because Ivy is "action by action" with no trace
-    # continuity, this invariant had to be shifted back into the actions that change ragged_trim_committed to true.  There is some
-    # doubt in my mind that this gives us a robust proof, but with Ivy there is no other option.
-    #
-    # invariant [H_trimSafety]  (ragged_trim_committed(N1, N1, L1, V) & ragged_trim_committed(N2, N2, L2, V))
-                              # -> (min_last_rcvd(N1, N1, L1, N3, V) = min_last_rcvd(N2, N2, L2, N3, V))
+    invariant [H_commit_decision_implies_membership] copied_a_commit_decision(N, S, V) -> (nset.contains(S, members(V)) & nset.contains(N, members(V)))
+    invariant [H_gotCommitSomewhere] ragged_trim_committed(N, N, L, V) -> ((wasLeader(L, V) & made_a_commit_decision(L, V)))
     invariant [S_viewSafety] forall N1:replica, N2:replica, V1:view, V2:view. (nset.contains(N1, members(V1)) & nset.contains(N2, members(V2)) & (vn(V1)=vn(V2)))
                               -> (nset.contains(N, members(V1)) <-> nset.contains(N, members(V2)))
     invariant [S_deliverSameMsgs] (viewSeq(V1, V2) & isActive(V1) & isActive(V2) & 
                               nset.contains(N1, members(V1)) & done(N1, V1) & nset.contains(N2, members(V1)) & done(N2, V1) & isFinal(V1))
                               -> delivered(N1, C, S, V1)=delivered(N2, C, S, V1)
+    invariant [A_action_was_not_checked] barf=false
 
 } with nset, view, replica, count, leaderVC
