@@ -1,0 +1,177 @@
+#lang ivy1.7
+
+module total_order_axioms(t) = {
+    relation (X:t < Y:t)
+    axiom [transitivity] X:t < Y & Y < Z -> X < Z
+    axiom [antisymmetry] ~(X:t < Y & Y < X)
+    axiom [totality] X:t < Y | X = Y | Y < X
+}
+
+
+type replica
+type nset
+relation member(N : replica, S : nset)
+relation majority(S : nset, S2: nset)
+axiom [majorities_intersect] forall M1, M2, C. (majority(M1,C) & majority(M2,C)) -> exists N.member(N,M1) & member(N,M2)
+axiom [majorities_in_carrier] forall M, N, C. majority(M,C) & member(N,M) -> member(N,C)
+axiom [non_empty_majorities] forall N, M. member(N,M) -> majority(M,M)
+
+individual eset : nset.
+axiom forall N : replica. ~member(N,eset)
+
+
+instantiate total_order_axioms(replica)
+
+type msg_clock
+type view
+instantiate total_order_axioms(msg_clock)
+instantiate total_order_axioms(view)
+
+function members(V:view) : nset                                              # For a view, returns its membership
+relation isActive(V:view)                                                    # True: View is in use.  False: not active
+
+
+
+invariant [Def_isActive_implies_prev_active] (V1 < V2 & isActive(V2)) -> isActive(V1)
+invariant [Def_isActive_implies_all_but_one_final] (isActive(A) & isActive(B) & A~=B) -> (isFinal(A) | isFinal(B))
+
+relation wasLeader(L:replica, V:view)                                              # Will be constrained by invariant to capture the notion of "was leader at some point"
+
+relation isFinal(V:view)                                                     # True: next view is active, this view is in a final state
+invariant [Def_isFinal_implies_active] isFinal(V) -> isActive(V)
+invariant [Def_not_everyone_final] exists N. ~isFinal(N) & isActive(N)
+
+relation myMajority(N:replica, S:nset, V:view)                               # S is a set that (1) N doesn't suspect  and (2) is a majority of V and (3) includes N.
+invariant [Def_myMajority_includes_me] (member(N, members(V)) & myMajority(N,S,V)) -> member(N,S)
+invariant [Def_myMajority_subset] myMajority(N,S,V) -> (member(N2,S) -> member(N2,members(V)))
+invariant [Def_myMajority_no_suspicion] (~suspected(N,N,N,V) & myMajority(N,S,V) & member(M,S))-> ~suspected(N,N,M,V)
+invariant [Def_myMajority_is_majority] myMajority(N,S,V) -> nset.majority(S,members(V))
+
+#make sure we never check to see if a set matches eset; no extensional equality
+individual eSet : nset                                                                           # simple empty set
+axiom ~member(N, eSet)
+
+relation suspected(O:replica, N1:replica, N2:replica, V:view)                    # In O's SST, N1 suspects N2.  This field is copied from view to view, so the view does nothing here
+invariant [Req_suspected_ignores_view] (V1 <= V2 & suspected(O,N1,N2,V1)) -> suspected(O,N1,N2,V2)
+invariant [Req_suspected_copied] suspected(O,N1,N2,V1) -> suspected(N1,N1,N2,V1)
+
+relation last_snt_index(S:replica, M:msg_clock, V:view)                          # S tracks how many message it has sent
+relation last_rcv_index(O:replica, N:replica, S:replica, M:msg_clock, V:view)    # N reports how many messages it has seen from S in V via this field
+#keep in mind: a separate relation for max that doesn't talk about reducing over the replicas
+invariant [Def_last_rcv_index_implies_membership] last_rcv_index(O,N,S,M,V) -> (member(O,members(V)) & member(N,members(V)) & member(S,members(V)))
+invariant [Req_last_rcv_index_copied] last_rcv_index(O,N,S,M1,V) & last_rcv_index(N,N,S,M2,V) -> M1 <= M2
+invariant [Req_last_rcv_index_snt] (last_rcv_index(O, N, S, M1, V) & last_snt_index(S, M, V)) -> M1 <= M
+
+relation min_last_rcvd(O:replica, N:replica, S:replica, M: msg_clock, V:view)  # The leader computes and reports min(last_rcvd) from S.  Later, N echoes it
+#related invariants: [Def_min_last_rcv_copied] [Def_min_last_rcv_copied_from_leader] [Def_min_last_rcv_implies_membership] [Def_min_last_rcv_leader_was_leader]
+
+relation adds(O:replica, N:replica, L:replica, OV:view, Q:nset)                  # Q is a set of members to add as we move to Vk+1.  The leader proposes and member N later echoes
+#related invariants: [Def_adds_known_to_leader] [Def_adds_copied] [Def_adds_copied_from_leader] [Def_adds_implies_membership] [Def_adds_leader_was_leader]
+
+#replaces num_changes
+relation all_changes(O:replica, N: replica, L: replica, Add : nset, Remove : nset)
+
+#replaces num_committed
+relation all_committed(O:replica, N: replica, L: replica, Add : nset, Remove : nset)
+
+relation removes(O:replica, N:replica, L:replica, OV:view, Q:nset)               # ..................... to remove
+#related invariants: [Def_removes_known_to_leader] [Def_removes_copied] [Def_removes_copied_from_leader] [Def_removes_implies_membership] [Def_removes_leader_was_leader]
+
+#NOTE: replacing echoing num_changes with just echoing the set.
+#NOTE: this means the "num_committed" will now just be the historic sets
+
+relation ragged_trim_computed(O:replica, N:replica, L:replica, V:view)           # Set when the leader reports min_last_rcvd, or when process N copies it from the leader
+#related invariants: [Def_ragged_trim_computed_copied] [Def_ragged_trim_computed_copied_from_leader] [Def_ragged_trim_computed_implies_membership] [Def_ragged_trim_computed_leader_was_leader]
+
+relation ragged_trim_committed(O:replica, N:replica, L:replica, V:view)          # As each process detects that everyone has the ragged trim, each reports that it has committed.
+#related invariants: [Def_ragged_trim_committed_copied] [Def_ragged_trim_committed_copied_from_leader] [Def_ragged_trim_committed_implies_membership] [Def_ragged_trim_committed_leader_was_leader]
+
+relation wedged(O:replica, N:replica, V:view)                                    # N "wedges" its SST row when it has stopped receiving messages because it knows of a pending change
+#related invariants: [Def_wedged_copied] [Def_wedged_implies_membership] 
+
+# These next are helper state variables, but not represented in the SST
+
+relation leader(N:replica, L:replica, V:view)                                    # N believes L to be the leader in view V
+#related invariant: [Def_leader_consistent]
+
+relation woke(L: replica, V:view)                                                # N knows itself to be the next leader in V, and every process in V that isn't suspected suspects every L<N
+#related invariants: [Def_woke_implies_leader] [Def_woke_implies_membership]
+
+relation made_a_commit_decision(L:replica, V:view)                               # As leader, L made a ragged trim commit decision in V
+#related invariants: [Def_made_a_commit_decision_consistent]
+
+relation copied_a_commit_decision(N:replica, S:replica, V:view)                  # Copied a ragged trim commit decision from S
+#this is only true if N has a commit decision that it coped from S (which in turn made it, or copied it)
+#related invariants: [Def_made_a_commit_decision] [Def_copied_a_commit_decsion]
+
+relation delivered_proj(N:replica, M:msg_clock, S:replica, V:view)                        # Messages delivered in a previous (or this) view
+#related invariants: [Def_delivered_membership]
+
+relation done(N:replica, V:view)                                                 # Replica N is finished delivering messages in view V
+#related invariants: [Def_done_membership]
+
+
+invariant [non_woke_leaders_uninit1] ~woke(N,V) -> ~adds(O, R, N, V, Q)
+invariant [non_woke_leaders_uninit2] ~woke(N,V) -> ~removes(O, R, N, V, Q)
+invariant [non_woke_leaders_uninit3] ~woke(N,V) -> ~ragged_trim_computed(O, R, N, V)
+
+action leader_awakes(n:replica, v:view) ={
+    assume isActive(v) & ~isFinal(v);
+    assume ~suspected(n, n, n, v);
+    assume member(n, members(v));
+    assume leader(n, n, v);
+    assume ~woke(n, v);
+
+    # This is the key step: Look at all the candidate leaders L in v (there must be one).  For each one lower ranked than n,
+    # make sure that every member of the view (1) suspects that candidate, or (2) is itself suspected by n.
+    assume exists L . (member(L, members(v)) & L < n);
+    assume forall L . (member(L, members(v)) & L < n) -> (forall N. member(N, members(v)) -> suspected(n, N, L, v) | suspected(n, n, N, v));
+
+    # Yay!  n is now a woke leader in v.  Now we need to identify any prior proposal and copy it over, and any prior proposed ragged trim
+    # The prior leader may not have managed to push its row to n, so we have to look for this information by iterating backwards leader
+    # by leader, and then for each possible prior leader, checking to see if anyone has echoed a proposal by it.  We do this by
+    # looking for the value of max_proposal_ldr/max_proposal_idx that are maximum among pairs that correspond to an SST row, in n's replica,
+    # that has non-empty content.  Of course we might not find anything at all, in which case n starts with a blank slate.  But if n does
+    # find a prior proposal, it must "build on it"
+    var max_proposal_idx: replica := *;
+    var max_proposal_ldr: replica := *;
+    var max_trim_idx: replica := *;
+    var max_trim_ldr: replica := *;
+    assume member(max_proposal_idx, members(v));
+    assume member(max_proposal_ldr, members(v)) & max_proposal_ldr < n;
+    assume member(max_trim_idx, members(v));
+    assume member(max_trim_ldr, members(v)) & max_trim_ldr < n;
+    assume num_changes(n, N, L) > 0 -> (L <= max_proposal_ldr & N <= max_proposal_idx);
+    assume exists N:replica, L:replica. num_changes(n, N, L) > 0 -> L = max_proposal_ldr & N = max_proposal_idx;
+    assume ragged_trim_computed(n, N, L, v) -> L <= max_trim_ldr & N <= max_trim_idx;
+    assume exists N:replica, L:replica. ragged_trim_computed(n, N, L, v) & L = max_trim_ldr & N = max_trim_idx;
+    # This is really an invariant, but Ivy somehow had problems with it and I moved it here because only this action impacts it.
+    assume forall N1,N2,N3,L1,L2,V. 
+    (ragged_trim_committed(N1, N1, L1, V) & ragged_trim_committed(N2, N2, L2, V)) ->
+    (min_last_rcvd(N1, N1, L1, N3, V) = min_last_rcvd(N2, N2, L2, N3, V));
+    # Now we can adopt those prior proposals.  The new leader will "build on them"
+    if(~(num_changes(n, max_proposal_idx, max_proposal_ldr) = 0)) {
+        # Never back knowledge out
+        assume adds(n, n, n, V, eSet);
+        assume removes(n, n, n, V, eSet);
+        assume num_changes(n, n, n) < num_changes(n, max_proposal_idx, max_proposal_ldr);
+        # Copy over everything from the guy who knew the most
+        adds(n, n, n, V, Q) := adds(n, max_proposal_idx, max_proposal_ldr, V, Q);
+        removes(n, n, n, V, Q) := removes(n, max_proposal_idx, max_proposal_ldr, V, Q);
+        num_changes(n, n, n) := count.next(num_changes(n, max_proposal_idx, max_proposal_ldr));
+    };
+    if(ragged_trim_computed(n, max_trim_idx, max_trim_ldr, v)) {
+        # Never back knowledge out
+        assume ~ragged_trim_computed(n, n, n, v);
+        assume min_last_rcvd(n, n, n, S, v)=0;
+        # Copy over everything from the guy who knew the most
+        min_last_rcvd(n, n, max_trim_ldr, S, v) := min_last_rcvd(n, max_trim_idx, max_trim_ldr, S, v);
+        ragged_trim_computed(n, n, max_trim_ldr, v) := ragged_trim_computed(n, max_trim_idx, max_trim_ldr, v);
+        ragged_trim_committed(n, n, max_trim_ldr, v) := ragged_trim_committed(n, max_trim_idx, max_trim_ldr, v);
+        # If the source had a committed trim, then this replica copied a commit decision
+        copied_a_commit_decision(n, max_trim_idx, v) := ragged_trim_committed(n, n, max_trim_ldr, v);
+        # Reestablishes the invariant
+        if( ~(forall N1,N2,N3,L1,L2,V. (ragged_trim_committed(N1, N1, L1, V) & ragged_trim_committed(N2, N2, L2, V)) -> (min_last_rcvd(N1, N1, L1, N3, V) = min_last_rcvd(N2, N2, L2, N3, V))) ) { assert_failed0 := true; };
+    };
+    woke(n, v) := true;
+}
