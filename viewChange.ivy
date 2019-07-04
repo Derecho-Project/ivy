@@ -30,7 +30,6 @@ module total_order(r) = {
 #
 ################################################################################
 
-
 object count = {
     instantiate unbounded_sequence
     var first: this
