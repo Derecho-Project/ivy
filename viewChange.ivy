@@ -30,12 +30,15 @@ module total_order(r) = {
 #
 ################################################################################
 
-object count = {
-    instantiate unbounded_sequence
-    var first: this
-    definition first = 0
-    property first <= X:t
-}
+module total_order_axioms(t) = {
+    relation (X:t < Y:t)
+    axiom [transitivity] X:t < Y & Y < Z -> X < Z
+    axiom [antisymmetry] ~(X:t < Y & Y < X)
+    axiom [totality] X:t < Y | X = Y | Y < X }
+
+type count
+
+instantiate total_order_axioms(count)
 
 object replica = {
     instantiate iterable
