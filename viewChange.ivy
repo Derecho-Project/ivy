@@ -31,36 +31,11 @@ module total_order(r) = {
 ################################################################################
 
 
-type count
 object count = {
-    alias t = this
+    instantiate unbounded_sequence
     var first: this
-    relation succ(X:t,Y:t)
-    action next(x:t) returns (y:t)
-    action prev(x:t) returns (y:t)
+    definition first = 0
     property first <= X:t
-    object spec = {
-        ...
-        property succ(X,Z) -> (X < Z & ~(X < Y & Y < Z))
-        property [transitivity] (T:t < U & U < V) -> (T < V)
-        property [antisymmetry] ~(T:t < U & U < T)
-        property [totality] T:t < U | T = U | U < T
-        
-        after next {
-            assert x < y & (x < Y -> y <= Y);
-            assert succ(x,y)
-        }
-        before prev {
-            assert first < x
-        }
-        after prev {
-            assert y < x & (Y < x -> Y <= y);
-            assert succ(y,x)
-        }
-    }
-    object impl = {
-       ...
-    }
 }
 
 object replica = {
@@ -529,9 +504,15 @@ isolate leaderVC = {
         assume ~suspected(n, n, n, v);
         assume ~wedged(n, n, v);
         # We increase the count.  
-        last_snt_index(n, v) := count.next(last_snt_index(n, v));
+        var s:count;
+        s := *;
+        assume count.succ(last_snt_index(n, v), s);
+        last_snt_index(n, v) := s;
         # Deliver to self instantly
-        last_rcv_index(n, n, n, v) := count.next(last_rcv_index(n, n, n, v));
+        var t:count;
+        t := *;
+        assume count.succ(last_rcv_index(n, n, n, v), t);
+        last_rcv_index(n, n, n, v) := t;
     }
 
     # Node n in view v receives a message from sender s
@@ -545,7 +526,10 @@ isolate leaderVC = {
         # s must have sent a message
         assume last_rcv_index(n, n, s, v) < last_rcv_index(s, s, s, v);
         # We increase the count.  
-        last_rcv_index(n, n, s, v) := count.next(last_rcv_index(n, n, s, v));
+        var t:count;
+        t := *;
+        assume count.succ(last_rcv_index(n, n, s, v), t);
+        last_rcv_index(n, n, s, v) := t;
     }
 
     # Delivery of a message from sender s
@@ -554,10 +538,11 @@ isolate leaderVC = {
         assume ~suspected(n, n, n, v);
         assume ~done(n, v);
         assume nset.contains(n, members(v)) & nset.contains(s, members(v));
+        assume last_snt_index(s, v) >= c;
         # All messages prior to c from S have been delivered by n
-        assume (c > count.first & ((C<c & C2<c) -> C2<=C)) -> (delivered(n, C, S, V) & ((C = c & S < s) -> delivered(n, c, S, V)));
+        assume count.succ(C, c) -> (delivered(n, C, S, V) & ((C = c & S < s) -> delivered(n, c, S, V)));
         # Deliver in round-robin order, either because the message is stable (normal case), or because the leader has committed a trim
-        assume last_rcv_index(n, N, S, V) >= c | (leader(n, L, v) & ragged_trim_committed(n, n, L, v) & min_last_rcvd(n, n, L, s, v) < c);
+        assume last_rcv_index(n, N, S, V) >= c | (leader(n, L, v) & ragged_trim_committed(n, n, L, v) & min_last_rcvd(n, n, L, s, v) >= c);
         delivered(n, c, s, v) := true;
     }
 
@@ -679,7 +664,11 @@ isolate leaderVC = {
                 # Copy over everything from the guy who knew the most
                 adds(n, n, n, V, Q) := adds(n, max_proposal_idx, max_proposal_ldr, V, Q);
                 removes(n, n, n, V, Q) := removes(n, max_proposal_idx, max_proposal_ldr, V, Q);
-                num_changes(n, n, n) := count.next(num_changes(n, max_proposal_idx, max_proposal_ldr));
+                # computes n+1, but in a way that avoids integer arithmetic
+                var t:count;
+                t := *;
+                assume count.succ(num_changes(n, max_proposal_idx, max_proposal_ldr), t);
+                num_changes(n, n, n) := t;
         };
         if(ragged_trim_computed(n, max_trim_idx, max_trim_ldr, v)) {
                 # Never back knowledge out
@@ -719,7 +708,10 @@ isolate leaderVC = {
         assume forall N:replica. nset.contains(N, toremove) -> nset.contains(N, members(v));
         adds(l, l, l, v, A) := A = toadd;
         removes(l, l, l, v, R) := R = toremove;
-	num_changes(l, l, l) := count.next(num_changes(l, l, l));
+        var t:count;
+        t := *;
+        assume count.succ(num_changes(l, l, l), t);
+	num_changes(l, l, l) := t;
         wedged(l, l, v) := true;
     }
 
@@ -1078,6 +1070,8 @@ isolate leaderVC = {
     export push_rows12
 
 #Matthew's structural invariants
+    invariant [Def_count_succ] forall A:count,B:count.    count.succ(A, B) -> A<B
+    invariant [Def_count_compare] forall A:count,B:count. A<B -> ~count.succ(B, A)
 
     invariant [Def_nextview_irreflexive] ~nextview(V,V)
     invariant [Def_vn_related_to_views1] vn(V0)=vn(V1) <-> V0=V1
