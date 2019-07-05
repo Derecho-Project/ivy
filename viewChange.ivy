@@ -408,6 +408,7 @@ relation made_a_commit_decision(L:replica, V:view)                              
 #related invariants: [Def_made_a_commit_decision_consistent]
 
 relation copied_a_commit_decision(N:replica, S:replica, V:view)                  # Copied a ragged trim commit decision from S
+relation copied_a_commit_decision_single(N:replica, V:view)                  # Copied a ragged trim commit decision from anywhere
 #this is only true if N has a commit decision that it coped from S (which in turn made it, or copied it)
 #related invariants: [Def_made_a_commit_decision] [Def_copied_a_commit_decsion]
 
@@ -469,6 +470,7 @@ isolate leaderVC = {
         ragged_trim_committed(O, N, L, V) := false;
         made_a_commit_decision(L, V) := false;
         copied_a_commit_decision(N, S, V) := false;
+        copied_a_commit_decision_single(N, V) := false;
         delivered(N, C, S, V) := false;
         done(N, V) := false;
         nextview(V1, V2) := false;
@@ -632,10 +634,14 @@ isolate leaderVC = {
         # looking for the value of max_proposal_ldr/max_proposal_idx that are maximum among pairs that correspond to an SST row, in n's replica,
         # that has non-empty content.  Of course we might not find anything at all, in which case n starts with a blank slate.  But if n does
         # find a prior proposal, it must "build on it"
-        var max_proposal_idx: replica := 0;
-	var max_proposal_ldr: replica := 0;
-	var max_trim_idx: replica := 0;
-        var max_trim_ldr: replica := 0;
+        var max_proposal_idx: replica;
+        max_proposal_idx := *;
+        var max_proposal_ldr: replica;
+        max_proposal_ldr := *;
+        var max_trim_idx: replica;
+        max_trim_idx := *;
+        var max_trim_ldr: replica;
+        max_trim_ldr := *;
         assume nset.contains(max_proposal_idx, members(v));
         assume nset.contains(max_proposal_ldr, members(v)) & max_proposal_ldr < n;
         assume nset.contains(max_trim_idx, members(v));
@@ -673,6 +679,7 @@ isolate leaderVC = {
                 ragged_trim_committed(n, n, max_trim_ldr, v) := ragged_trim_committed(n, max_trim_idx, max_trim_ldr, v);
                 # If the source had a committed trim, then this node copied a commit decision
                 copied_a_commit_decision(n, max_trim_idx, v) := ragged_trim_committed(n, n, max_trim_ldr, v);
+                copied_a_commit_decision_single(n, v) := (copied_a_commit_decision_single(n, v) | ragged_trim_committed(n, n, max_trim_ldr, v));
                 # Reestablishes the invariant
                 if( ~(forall N1,N2,N3,L1,L2,V. (ragged_trim_committed(N1, N1, L1, V) & ragged_trim_committed(N2, N2, L2, V)) -> (min_last_rcvd(N1, N1, L1, N3, V) = min_last_rcvd(N2, N2, L2, N3, V))) ) { assert_failed_0 := true; };
         };
@@ -1133,7 +1140,11 @@ isolate leaderVC = {
     invariant [Def_woke_implies_membership] woke(L,V) -> nset.contains(L,members(V))
 
     invariant [Def_copied_a_commit_decision_implies_made_one] copied_a_commit_decision(N, S, V) ->
-                                                                (made_a_commit_decision(S,V) | copied_a_commit_decision(S, S, V))
+    (made_a_commit_decision(S,V) | copied_a_commit_decision_single(S, V))
+    invariant [Def_copied_a_commit_decision_single_membership] copied_a_commit_decision_single(N, V) -> nset.contains(N,members(V))
+    invariant [Def_copied_a_commit_decision_single_implies_multi] copied_a_commit_decision(N, S, V) ->
+    copied_a_commit_decision_single(N, V)
+    
     invariant [Def_made_a_commit_decision_consistent] made_a_commit_decision(L,V) -> wasLeader(L,V)
 
     invariant [Def_count_agrees1] (V1 < V2 & isActive(V1) & isActive(V2)) -> (vn(V1) < vn(V2))
