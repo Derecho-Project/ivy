@@ -34,7 +34,7 @@ object count = {
 
     object spec = {
 
-        property succ(X,Z) -> (X < Z & ~(X < Y & Y < Z) & ~X=Z)
+        axiom succ(X,Z) -> (X < Z & ~(X < Y & Y < Z) & ~X=Z)
 
         property [transitivity] (T:count < U & U < V) -> (T < V)
         property [antisymmetry] ~(T:count < U & U < T)
@@ -53,6 +53,24 @@ object count = {
 	    assert succ(y,x)
         }
     }
+
+    #object impl = {
+
+        #interpret count -> nat
+
+        #definition succ(X,Z) = (Z = X+1)
+
+        #implement next {
+            #y := x + 1
+        #}
+        #implement prev {
+            #y := x - 1
+        #}
+    #}
+
+    #isolate iso = impl,spec
+
+    #attribute test = impl
 }
 
 object replica = {
@@ -603,6 +621,7 @@ isolate leaderVC = {
     action propagate(n:replica, w:replica, v:view) = {
         # if n has shut down, no further actions will occur
         assume isActive(v) & ~isFinal(v);
+        assume nset.contains(n, members(v));
         assume ~suspected(n, n, n, v);
         assume nset.contains(n, members(v)) & nset.contains(w, members(v));
         # if n suspects w, then it ignores suspicions w may be "spreading"
@@ -612,17 +631,25 @@ isolate leaderVC = {
         # Compute the union of w's suspicions with n's suspicions.  In fact n could learn that w
         # suspects n, and this is fine... n will end up suspecting itself too, which shuts n down.
         var news:nset;
+        news := *;
         assume nset.contains(N, news) <-> (suspected(n, w, N, v) | suspected(n, n, N, v));
         # Check that we would still have a majority.  Never enter a state in which a node suspects a majority of members of its own view
-        if exists S:nset. forall N. nset.contains(N, S) & ~nset.contains(N, news) & nset.majority(S, members(v)) & (forall N. nset.contains(N, S) -> ~suspected(n, n, N, v)) {
+        if (~nset.contains(n, news) & exists S:nset. (nset.majority(S, members(v)) & ~nset.contains(n, S) & (forall N. nset.contains(N, S) -> (nset.contains(N, members(v)) & ~nset.contains(N, news))))) { barf := true; };
+        if (~nset.contains(n, news) & exists S:nset. (nset.majority(S, members(v)) & nset.contains(n, S) & (forall N. nset.contains(N, S) -> (nset.contains(N, members(v)) & ~nset.contains(N, news))))) {
+            var s:nset;
+            s := *;
+            assume (nset.majority(s, members(v)) & nset.contains(n, s) & (forall N. nset.contains(N, s) -> (nset.contains(N, members(v)) & ~nset.contains(M, news))));
+            myMajority(n, s, v) := true;
             # Update n's own suspicions, which will now include those it learned of from w
             suspected(n, n, N, v) := nset.contains(N, news);
             # If n suspects every process ranked lower than l, then n consider l to be its leader.
             var l:replica;
+            l := *;
             assume nset.contains(l, members(v));
             assume ~suspected(n, n, l, v) & forall N. nset.contains(N, members(v)) & ~suspected(n, n, N, v) -> N >= l;
             leader(n, L, v) := L = l;
             wedged(n, n, v) := true;
+            barf := true;
         }
         else {
             # We arrive here if n suspects a majority of members of view v
@@ -656,10 +683,14 @@ isolate leaderVC = {
         # looking for the value of max_proposal_ldr/max_proposal_idx that are maximum among pairs that correspond to an SST row, in n's replica,
         # that has non-empty content.  Of course we might not find anything at all, in which case n starts with a blank slate.  But if n does
         # find a prior proposal, it must "build on it"
-        var max_proposal_idx: replica := 0;
-	var max_proposal_ldr: replica := 0;
-	var max_trim_idx: replica := 0;
-        var max_trim_ldr: replica := 0;
+        var max_proposal_idx: replica;
+	var max_proposal_ldr: replica;
+	var max_trim_idx: replica;
+        var max_trim_ldr: replica;
+        max_proposal_idx := *;
+	max_proposal_ldr := *;
+	max_trim_idx := *;
+        max_trim_ldr := *;
         assume nset.contains(max_proposal_idx, members(v));
         assume nset.contains(max_proposal_ldr, members(v)) & max_proposal_ldr < n;
         assume nset.contains(max_trim_idx, members(v));
@@ -686,9 +717,11 @@ isolate leaderVC = {
                 t := *;
                 assume count.succ(num_changes(n, max_proposal_idx, max_proposal_ldr), t);
                 num_changes(n, n, n) := t;
+                barf := true;
         };
         if(ragged_trim_computed(n, max_trim_idx, max_trim_ldr, v)) {
                 # Never back knowledge out
+                assume made_a_commit_decision(max_trim_ldr, v);
                 assume ~ragged_trim_computed(n, n, n, v);
                 assume min_last_rcvd(n, n, n, S, v)=count.first;
                 # Copy over everything from the guy who knew the most
@@ -699,8 +732,10 @@ isolate leaderVC = {
                 copied_a_commit_decision(n, max_trim_idx, v) := ragged_trim_committed(n, n, max_trim_ldr, v);
                 # Reestablishes the invariant
                 if( ~(forall N1,N2,N3,L1,L2,V. (ragged_trim_committed(N1, N1, L1, V) & ragged_trim_committed(N2, N2, L2, V)) -> (min_last_rcvd(N1, N1, L1, N3, V) = min_last_rcvd(N2, N2, L2, N3, V))) ) { assert_failed_0 := true; };
+                barf := true;
         };
 	woke(n, v) := true;
+	barf := true;
     }
 
     # A leader in view v proposes changes to the membership of the current view, or some future view
@@ -1056,35 +1091,35 @@ isolate leaderVC = {
         ragged_trim_computed(r, s, N, v) := ragged_trim_computed(s, s, N, v);
     }
 
-    export snd_msg
-    export rcv_msg
-    export deliver_msg
-    export finished
-    export suspect
+    #export snd_msg
+    #export rcv_msg
+    #export deliver_msg
+    #export finished
+    #export suspect
     export propagate
-    export leader_awakes
-    export propose
-    export copy_leader_changes
-    export min_num_acked
-    export copy_leader_committed
-    export leader_computes_ragged_min
-    export non_leader_computes_ragged_min
-    export leader_ragged_trim_commits
-    export newViewUpdate
-    export push_rows1T
-    export push_rows1F
-    export push_rows2
-    export push_rows3T
-    export push_rows3F
-    export push_rows4
-    export push_rows5
-    export push_rows6
-    export push_rows7
-    export push_rows8
-    export push_rows9
-    export push_rows10
-    export push_rows11
-    export push_rows12
+    #export leader_awakes
+    #export propose
+    #export copy_leader_changes
+    #export min_num_acked
+    #export copy_leader_committed
+    #export leader_computes_ragged_min
+    #export non_leader_computes_ragged_min
+    #export leader_ragged_trim_commits
+    #export newViewUpdate
+    #export push_rows1T
+    #export push_rows1F
+    #export push_rows2
+    #export push_rows3T
+    #export push_rows3F
+    #export push_rows4
+    #export push_rows5
+    #export push_rows6
+    #export push_rows7
+    #export push_rows8
+    #export push_rows9
+    #export push_rows10
+    #export push_rows11
+    #export push_rows12
 
 #Matthew's structural invariants
 #    invariant [Def_count_succ] forall A:count,B:count.    count.succ(A, B) -> A<B
