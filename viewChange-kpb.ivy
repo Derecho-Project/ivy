@@ -496,7 +496,8 @@ isolate leaderVC = {
     after init {
         assume V0=V1 <-> vn(V0)=vn(V1);
         assume V0<V1 <-> vn(V0)<vn(V1);
-        members(V) := nset.firstset if V = view.first else nset.emptyset;
+        eSet := nset.emptyset;
+        members(V) := nset.firstset if V = view.first else eSet;
         myMajority(N, S, V) := S=members(V) & nset.contains(N, S);
         isActive(V) := V = view.first;
         vn(view.first) := count.first;
@@ -1127,6 +1128,8 @@ isolate leaderVC = {
 #    invariant [Def_count_compare] forall A:count,B:count. A<B -> ~count.succ(B, A)
 
     invariant [A_action_was_not_checked] barf=false
+
+    invariant [Def_uniqueness_of_nsets] (~A=eSet & nset.contains(N,A) <-> nset.contains(N,B)) -> A=B
 
     invariant [Def_nextview_irreflexive] ~nextview(V,V)
     invariant [Def_vn_related_to_views1] isActive(V0) & isActive(V1) -> (vn(V0)=vn(V1) <-> V0=V1)
