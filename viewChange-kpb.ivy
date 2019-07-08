@@ -396,7 +396,7 @@ relation isFinal(V:view)                                                     # T
 relation myMajority(N:replica, S:nset, V:view)                               # S is a set that (1) N doesn't suspect  and (2) is a majority of V and (3) includes N.
 #related invariants: [Def_myMajority_includes_me] [Def_myMajority_no_suspicion] [Def_myMajority_is_majority]
 
-individual eSet : nset                                                                           # simple empty set
+individual eSet : nset                                                                           # simple empty set, but we can't be sure others won't also be empty
 axiom ~nset.contains(N, eSet)
 
 # SST fields.  Because the SST is replicated, each of these needs to tell us which replica the fields are in.
@@ -496,7 +496,6 @@ isolate leaderVC = {
     after init {
         assume V0=V1 <-> vn(V0)=vn(V1);
         assume V0<V1 <-> vn(V0)<vn(V1);
-        eSet := nset.emptyset;
         members(V) := nset.firstset if V = view.first else eSet;
         myMajority(N, S, V) := S=members(V) & nset.contains(N, S);
         isActive(V) := V = view.first;
@@ -668,22 +667,24 @@ isolate leaderVC = {
     # non-"woke" leader from a "woke" one.
     action leader_awakes(n:replica, v:view) ={
         var max_proposal_idx: replica;
-	var max_proposal_ldr: replica;
-	var max_trim_idx: replica;
+        var max_proposal_ldr: replica;
+        var max_trim_idx: replica;
         var max_trim_ldr: replica;
         assume isActive(v) & ~isFinal(v);
+        assume V>v -> ~isActive(V);
         assume ~suspected(n, n, n, v);
         assume nset.contains(n, members(v));
-        assume leader(n, n, v);
+        assume leader(n, n, v) & wasLeader(n, v);
         assume ~woke(n, v);
+        assume V<=v -> wedged(n, n, V);
         # Since this guy wasn't previously the leader, he didn't previously propose anything, but Ivy wouldn't know that.
-        assume ~Q=eSet -> (adds(O, N, n, OV, Q) = false);
-	assume ~Q=eSet -> (removes(O, N, n, OV, Q) = false);
+        assume adds(O, N, n, OV, Q) = false;
+        assume removes(O, N, n, OV, Q) = false;
         assume num_changes(O, N, n) = count.first;
         assume ragged_trim_computed(O, N, n, V) = false;
         # This is the key step: Look at all the candidate leaders L in v (there must be one).  For each one lower ranked than n,
         # make sure that every member of the view (1) suspects that candidate, or (2) is itself suspected by n.
-	assume exists L . (nset.contains(L, members(v)) & L < n);
+        assume exists L . (nset.contains(L, members(v)) & L < n);
         assume forall L . (nset.contains(L, members(v)) & L < n) -> (forall N. nset.contains(N, members(v)) -> suspected(n, N, L, v) | suspected(n, n, N, v));
 
         # Yay!  n is now a woke leader in v.  Now we need to identify any prior proposal and copy it over, and any prior proposed ragged trim
@@ -693,8 +694,8 @@ isolate leaderVC = {
         # that has non-empty content.  Of course we might not find anything at all, in which case n starts with a blank slate.  But if n does
         # find a prior proposal, it must "build on it"
         max_proposal_idx := *;
-	max_proposal_ldr := *;
-	max_trim_idx := *;
+        max_proposal_ldr := *;
+        max_trim_idx := *;
         max_trim_ldr := *;
         assume nset.contains(max_proposal_idx, members(v));
         assume nset.contains(max_proposal_ldr, members(v));
@@ -703,69 +704,57 @@ isolate leaderVC = {
         assume (~L=n & wasLeader(L, v) & (num_changes(n, N, L) > count.first -> (L <= max_proposal_ldr & N <= max_proposal_idx))) | (max_proposal_ldr=0 & max_proposal_idx=0);
         assume (exists N:replica, L:replica.~L=N & num_changes(n, N, L) > count.first -> L = max_proposal_ldr & N = max_proposal_idx) | (max_proposal_ldr=0 & max_proposal_idx=0);
         assume (~L=N & (ragged_trim_computed(n, N, L, v) -> L <= max_trim_ldr & N <= max_trim_idx)) | (max_trim_ldr=0 & max_trim_idx=0);
-	assume (exists N:replica, L:replica. ~L=N & ragged_trim_computed(n, N, L, v) & L = max_trim_ldr & N = max_trim_idx) | (max_trim_ldr=0 & max_trim_idx=0);
+        assume (exists N:replica, L:replica. ~L=N & ragged_trim_computed(n, N, L, v) & L = max_trim_ldr & N = max_trim_idx) | (max_trim_ldr=0 & max_trim_idx=0);
         # This is really an invariant, but Ivy somehow had problems with it and I moved it here because only this action impacts it.
         assume forall N1,N2,N3,L1,L2,V. 
               (ragged_trim_committed(N1, N1, L1, V) & ragged_trim_committed(N2, N2, L2, V)) ->
               (min_last_rcvd(N1, N1, L1, N3, V) = min_last_rcvd(N2, N2, L2, N3, V));
         # Now we can adopt those prior proposals.  The new leader will "build on them"
-        if(num_changes(n, max_proposal_idx, max_proposal_ldr)>0 & ~max_proposal_ldr=n & exists Q. (~Q=eSet & (adds(max_proposal_ldr, max_proposal_ldr, max_proposal_ldr, v, Q) | removes(max_proposal_ldr, max_proposal_ldr, max_proposal_ldr, v, Q)))) {
-    	    # Never back knowledge out
-    	    assume adds(n, n, n, v, eSet);
-    	    assume removes(n, n, n, v, eSet);
-    	    assume num_changes(n, n, n) < num_changes(n, max_proposal_idx, max_proposal_ldr);
-    	    # Copy over everything from the guy who knew the most
-    	    adds(n, n, n, V, Q) := adds(n, max_proposal_idx, max_proposal_ldr, V, Q) if adds(n, n, n, V, Q)=false else old adds(n, n, n, V, Q);
-    	    removes(n, n, n, V, Q) := removes(n, max_proposal_idx, max_proposal_ldr, V, Q) if removes(n, n, n, V, Q)=false else old removes(n, n, n, V, Q);
-    	    # computes n+1, but in a way that avoids integer arithmetic
-    	    var t:count;
-    	    t := *;
-    	    assume count.succ(num_changes(n, max_proposal_idx, max_proposal_ldr), t);
-    	    num_changes(n, n, n) := t;
+        if(num_changes(n, max_proposal_idx, max_proposal_ldr)>num_changes(n, n, max_proposal_ldr)) {
+                # Leaders don't change proposals!
+                assume wedged(n, max_proposal_ldr, v);
+                assume ~adds(n, n, max_proposal_ldr, V, Q) ;
+                assume ~removes(n, n, max_proposal_ldr, V, Q);
+                # Copy over everything from the guy who knew the most
+                adds(n, n, max_proposal_ldr, V, Q) := adds(n, max_proposal_idx, max_proposal_ldr, V, Q);
+                removes(n, n, max_proposal_ldr, V, Q) := removes(n, max_proposal_idx, max_proposal_ldr, V, Q);
+                num_changes(n, n, max_proposal_ldr) := num_changes(n, max_proposal_idx, max_proposal_ldr);
         };
         if(ragged_trim_computed(n, max_trim_idx, max_trim_ldr, v) & ~max_trim_ldr=n) {
-    	    # Never back knowledge out
-    	    assume made_a_commit_decision(max_trim_ldr, v);
-    	    assume ~ragged_trim_computed(n, n, n, v);
-    	    assume min_last_rcvd(n, n, n, S, v)=count.first;
-    	    # Copy over everything from the guy who knew the most
-    	    min_last_rcvd(n, n, max_trim_ldr, S, v) := min_last_rcvd(n, max_trim_idx, max_trim_ldr, S, v);
-    	    ragged_trim_computed(n, n, max_trim_ldr, v) := ragged_trim_computed(n, max_trim_idx, max_trim_ldr, v);
-    	    ragged_trim_committed(n, n, max_trim_ldr, v) := ragged_trim_committed(n, max_trim_idx, max_trim_ldr, v);
-    	    # If the source had a committed trim, then this node copied a commit decision
-    	    copied_a_commit_decision(n, max_trim_idx, v) := ragged_trim_committed(n, n, max_trim_ldr, v);
-    	    # Reestablishes the invariant
-    	    if( ~(forall N1,N2,N3,L1,L2,V. (ragged_trim_committed(N1, N1, L1, V) & ragged_trim_committed(N2, N2, L2, V)) -> (min_last_rcvd(N1, N1, L1, N3, V) = min_last_rcvd(N2, N2, L2, N3, V))) ) { assert_failed_0 := true; };
+                # Never back knowledge out
+                assume made_a_commit_decision(max_trim_ldr, v);
+                assume ~ragged_trim_computed(n, n, n, v);
+                assume min_last_rcvd(n, n, n, S, v)=count.first;
+                # Copy over everything from the guy who knew the most
+                min_last_rcvd(n, n, max_trim_ldr, S, v) := min_last_rcvd(n, max_trim_idx, max_trim_ldr, S, v);
+                ragged_trim_computed(n, n, max_trim_ldr, v) := ragged_trim_computed(n, max_trim_idx, max_trim_ldr, v);
+                ragged_trim_committed(n, n, max_trim_ldr, v) := ragged_trim_committed(n, max_trim_idx, max_trim_ldr, v);
+                # If the source had a committed trim, then this node copied a commit decision
+                copied_a_commit_decision(n, max_trim_idx, v) := ragged_trim_committed(n, n, max_trim_ldr, v);
+                # Reestablishes the invariant
+                if( ~(forall N1,N2,N3,L1,L2,V. (ragged_trim_committed(N1, N1, L1, V) & ragged_trim_committed(N2, N2, L2, V)) -> (min_last_rcvd(N1, N1, L1, N3, V) = min_last_rcvd(N2, N2, L2, N3, V))) ) { assert_failed_0 := true; };
         };
-	woke(n, v) := true;
+        woke(n, v) := true;
     }
 
     # A leader in view v proposes changes to the membership of the current view, or some future view
     action propose(l:replica, toadd:nset, toremove:nset, v:view) = {
         assume isActive(v) & ~isFinal(v);
+        assume V>v -> ~isActive(V);
+        assume (view.succ(v,V1) & isActive(V1)) -> vn(V1)=(vn(v)+1);
+        assume vn(V1)=(vn(V0)+1) <-> view.succ(V0,V1);
         assume ~suspected(l, l, l, v);
         assume leader(l, l, v) & wasLeader(l, v);
         assume woke(l, v);
-        # These next few are because Ivy doesn't understand that proposals are monotonic in Derecho
-        assume V<v -> isFinal(V);
-        assume V>v -> ~isActive(V);
-        assume V>=v -> adds(O, N, l, V, A)=false;
-        assume V<v -> (adds(O, N, l, V, A) -> wasLeader(l, V));
-        assume V>=v -> removes(O, N, l, V, R)=false;
-        assume V<v -> (removes(O, N, l, V, A) -> wasLeader(l, V));
-        assume num_changes(l, l, l) >= vn(v);
-        assume (vn(V)<vn(v) & nset.contains(N, members(V))) -> (suspected(N, N, N, V) | wedged(N, N, V));
-
-        # Now we can get to work!
         assume exists M. nset.contains(M, toadd) | nset.contains(M, toremove);
         assume forall N:replica. nset.contains(N, toadd) -> (~nset.contains(N, members(v)) & (nset.contains(M, members(v)) -> M<N));
         assume forall N:replica. nset.contains(N, toremove) -> nset.contains(N, members(v));
-        adds(l, l, l, v, A) := A = toadd;
-        removes(l, l, l, v, R) := R = toremove;
-        var t:count;
-        t := *;
-        assume count.succ(num_changes(l, l, l), t);
-	num_changes(l, l, l) := t;
+        assume adds(l, l, l, v, S)=false;
+        assume removes(l, l, l, v, S)=false;
+        assume num_changes(l, l, l)>=vn(v);
+        adds(l, l, l, v, A) := A=toadd;
+        removes(l, l, l, v, R) := R=toremove;
+        num_changes(l, l, l) := count.next(num_changes(l, l, l));
         wedged(l, l, v) := true;
     }
 
@@ -880,9 +869,9 @@ isolate leaderVC = {
         # These assumptions correspond to invariants that I was forced to move to newViewUpdate
         assume (forall O,N1,N2,V1,V2. (suspected(O,N1,N2,V1) & nextview(V1,V2)) ->
               (suspected(O,N1,N2,V2) | suspected(O,O,O,V1) | suspected(O,O,O,V2) | suspected(N1,N1,N1,V1) | suspected(N1,N1,N1,V2)));
-	assume viewSeq(ov, v);
+        assume viewSeq(ov, v);
         assume forall P. ((nset.contains(P, members(ov)) -> (nset.contains(P, members(v)) | nset.contains(P, rem))) & 
-	        (nset.contains(P, members(v)) -> (nset.contains(P, members(ov)) | nset.contains(P, add))));
+                (nset.contains(P, members(v)) -> (nset.contains(P, members(ov)) | nset.contains(P, add))));
         #assume forall N,P. exists S:nset. nset.contains(N, members(v)) -> (myMajority(N, S, v) & (nset.contains(P, S) -> ~suspected(N, N, P, v)));
         assume ((nextview(ov, v) & isFinal(ov)) -> isActive(v));
         # This next logic computes members(ov) - remove + add
@@ -904,13 +893,13 @@ isolate leaderVC = {
         assume myMajority(N, S, v) <-> (nset.majority(S, members(v)) & (nset.contains(P, S) -> ~suspected(N, N, P, v)));
         nextview(ov, v) := true;
         isFinal(ov) := true;
-	isActive(v) := true;
+        isActive(v) := true;
         # These post-conditions used to be invariants but Ivy is happier with them here, as "ensure" properties
         if(~ (forall O,N1,N2,V1,V2. (suspected(O,N1,N2,V1) & nextview(V1,V2)) ->
               (suspected(O,N1,N2,V2) | suspected(O,O,O,V1) | suspected(O,O,O,V2) | suspected(N1,N1,N1,V1) | suspected(N1,N1,N1,V2))) ) { assert_failed_4 := true; };
-	if(~ viewSeq(ov, v) ) { assert_failed_5 := true; };
+        if(~ viewSeq(ov, v) ) { assert_failed_5 := true; };
         if(~ (forall P. ((nset.contains(P, members(ov)) -> (nset.contains(P, members(v)) | nset.contains(P, rem))) & 
-	        (nset.contains(P, members(v)) -> (nset.contains(P, members(ov)) | nset.contains(P, add)))))) { assert_failed_6 := true; };
+                (nset.contains(P, members(v)) -> (nset.contains(P, members(ov)) | nset.contains(P, add)))))) { assert_failed_6 := true; };
         # There is a majority in which I believe...
         #if(~ (forall N,P. exists S:nset. nset.contains(N, members(v)) -> (myMajority(N, S, v) & (nset.contains(P, S) -> ~suspected(N, N, P, v)))) ) { assert_failed_7 := true; };
         # Hands off from one view to the next
@@ -1124,20 +1113,15 @@ isolate leaderVC = {
     export push_rows12
 
 #Matthew's structural invariants
-#    invariant [Def_count_succ] forall A:count,B:count.    count.succ(A, B) -> A<B
-#    invariant [Def_count_compare] forall A:count,B:count. A<B -> ~count.succ(B, A)
-
     invariant [A_action_was_not_checked] barf=false
 
-    invariant [Def_uniqueness_of_nsets] (~A=eSet & nset.contains(N,A) <-> nset.contains(N,B)) -> A=B
-
     invariant [Def_nextview_irreflexive] ~nextview(V,V)
-    invariant [Def_vn_related_to_views1] isActive(V0) & isActive(V1) -> (vn(V0)=vn(V1) <-> V0=V1)
-    invariant [Def_vn_related_to_views2] isActive(V0) & isActive(V1) -> (count.succ(vn(V0), vn(V1)) <-> view.succ(V0, V1))
+    invariant [Def_vn_related_to_views1] (isActive(V0) & isActive(V1)) -> (vn(V0)=vn(V1) <-> V0=V1)
+    invariant [Def_vn_related_to_views2] (isActive(V0) & isActive(V1)) -> (count.succ(vn(V0), vn(V1)) <-> view.succ(V0, V1))
 
     invariant [Def_isActive_sequence] (viewSeq(V1,V2) & isActive(V2)) -> isActive(V1)
     invariant [Def_isActive_implies_prev_active] (nextview(V1, V2) & isActive(V2)) -> isActive(V1)
-    invariant [Def_isActive_implies_all_but_one_final] (isActive(A) & isActive(B) & ~A=B) -> (isFinal(A) | isActive(B))
+    invariant [Def_isActive_implies_all_but_one_final] (isActive(A) & isActive(B) & ~A=B) -> (isFinal(A) | isFinal(B))
 
     invariant [Def_isFinal_implies_active] isFinal(V) -> isActive(V)
 
@@ -1158,17 +1142,19 @@ isolate leaderVC = {
     invariant [Def_min_last_rcv_implies_membership] min_last_rcvd(O,N,L,S,V)>count.first -> (nset.contains(O,members(V)) & nset.contains(N,members(V)) & nset.contains(L,members(V)) & nset.contains(S,members(V)))
     invariant [Def_min_last_rcv_leader_was_leader] min_last_rcvd(O,N,L,S,V)>count.first -> wasLeader(L,V)
 
-    invariant [Def_adds_known_to_leader] (adds(O, N, L, OV, Q) & ~Q=eSet) -> adds(L, L, L, OV, Q)
-    invariant [Def_adds_copied] (adds(O,N,L,OV,Q) & ~Q=eSet) -> adds(N,N,L,OV,Q)
-    invariant [Def_adds_copied_from_leader] (adds(N,N,L,OV,Q) & ~Q=eSet) -> adds(L,L,L,OV,Q)
-    invariant [Def_adds_implies_membership] (adds(O,N,L,OV,Q) & ~Q=eSet) -> (nset.contains(O,members(OV)) & nset.contains(N,members(OV)) & nset.contains(L,members(OV)))
-    invariant [Def_adds_leader_was_leader] (adds(O,N,L,OV,Q) & ~Q=eSet) -> wasLeader(L,OV)
+    #invariant [Def_adds_if_num_changes] (isActive(OV) & exists Q. adds(O,N,L,OV,Q)) -> vn(OV)<=num_changes(L,L,L) 
+    invariant [Def_adds_known_to_leader] adds(O, N, L, OV, Q) -> adds(L, L, L, OV, Q)
+    invariant [Def_adds_copied] adds(O,N,L,OV,Q) -> adds(N,N,L,OV,Q)
+    invariant [Def_adds_copied_from_leader] adds(N,N,L,OV,Q) -> adds(L,L,L,OV,Q)
+    invariant [Def_adds_implies_membership] adds(O,N,L,OV,Q) -> (nset.contains(O,members(OV)) & nset.contains(N,members(OV)) & nset.contains(L,members(OV)))
+    invariant [Def_adds_leader_was_leader] adds(O,N,L,OV,Q) -> wasLeader(L,OV)
 
-    invariant [Def_removes_known_to_leader] (removes(O, N, L, OV, Q) & ~Q=eSet) -> removes(L, L, L, OV, Q)
-    invariant [Def_removes_copied] (removes(O,N,L,OV,Q) & ~Q=eSet) -> removes(N,N,L,OV,Q)
-    invariant [Def_removes_copied_from_leader] (removes(N,N,L,OV,Q) & ~Q=eSet) -> removes(L,L,L,OV,Q)
-    invariant [Def_removes_implies_membership] (removes(O,N,L,OV,Q) & ~Q=eSet) -> (nset.contains(O,members(OV)) & nset.contains(N,members(OV)) & nset.contains(L,members(OV)))
-    invariant [Def_removes_leader_was_leader] (removes(O,N,L,OV,Q) & ~Q=eSet) -> wasLeader(L,OV)
+    #invariant [Def_removes_if_num_changes] (exists Q. removes(O,N,L,OV,Q)) -> vn(OV)<=num_changes(L,L,L) 
+    invariant [Def_removes_known_to_leader] removes(O, N, L, OV, Q) -> removes(L, L, L, OV, Q)
+    invariant [Def_removes_copied] removes(O,N,L,OV,Q) -> removes(N,N,L,OV,Q)
+    invariant [Def_removes_copied_from_leader] removes(N,N,L,OV,Q) -> removes(L,L,L,OV,Q)
+    invariant [Def_removes_implies_membership] removes(O,N,L,OV,Q) -> (nset.contains(O,members(OV)) & nset.contains(N,members(OV)) & nset.contains(L,members(OV)))
+    invariant [Def_removes_leader_was_leader] removes(O,N,L,OV,Q) -> wasLeader(L,OV)
 
     invariant [Def_num_changes_copied] num_changes(O,N,L) <= num_changes(N,N,L)
     invariant [Def_num_changes_copied_from_leader] num_changes(N,N,L) <= num_changes(L,L,L)
@@ -1186,6 +1172,7 @@ isolate leaderVC = {
     invariant [Def_ragged_trim_committed_implies_membership] ragged_trim_committed(O, N, L, V) -> (nset.contains(O,members(V)) & nset.contains(N,members(V)) & nset.contains(L,members(V)))
     invariant [Def_ragged_trim_committed_leader_was_leader] ragged_trim_committed(O, N, L, V) -> wasLeader(L,V)
 
+    invariant [Def_wedged_prior] (isActive(V2) & view.succ(V1, V2) & nset.contains(N, members(V1)) & ~suspected(N,N,N,V1)) -> wedged(N,N,V1)
     invariant [Def_wedged_if_suspects] (~suspected(N,N,N,V) & suspected(N,N,F,V)) -> wedged(N,N,V)
     invariant [Def_wedged_if_changes] (~suspected(N,N,N,V) & isActive(V) & nset.contains(N, members(V)) & num_changes(N,N,L)>vn(V)) -> wedged(N,N,V)
     invariant [Def_wedged_if_ragged_trim] (~suspected(N,N,N,V) & ragged_trim_computed(N,N,L,V)) -> wedged(N,N,V)
@@ -1217,10 +1204,11 @@ isolate leaderVC = {
     invariant [Def_viewSeq_nextview] viewSeq(V1,V2) -> nextview(V1,V2)
 
 #initialization invariants
-    invariant [S_leader0] leader(0,0,0)
-    invariant [S_active0] isActive(0)
-    invariant [S_vn0] V=0 -> vn(V2)>=vn(V)
-    invariant [H_initialLeader] nset.contains(0, members(V)) -> woke(0, V)
+    invariant [S_leader0] V=view.first -> leader(0,0,V)
+    invariant [S_active0] V=view.first -> isActive(V)
+    invariant [H_vn0] vn(0)=0
+    invariant [S_vn0] V=view.first -> vn(V2)>=vn(V)
+    invariant [H_initialLeader] V=view.first -> woke(0, V)
 
 #existing structural invariants
     invariant [H_addsPfun] (adds(O, N, L, V, Q1) & adds(O, N, L, V, Q2)) -> Q1 = Q2
@@ -1270,8 +1258,8 @@ isolate leaderVC = {
     invariant [H_echoMakesSense2] ~ragged_trim_computed(O, N, L, V) | ~ragged_trim_computed(N, N, L, V) | 
                                 (min_last_rcvd(O, N, L, S, V)=min_last_rcvd(N, N, L, S, V) & 
                                 (leader(L, L, V) & min_last_rcvd(O, N, L, S, V)=min_last_rcvd(L, L, L, S, V)))
-    invariant [H_echoMakesSense3] adds(O, N, L, V, Q) -> (Q = eSet | adds(L, L, L, V, Q))
-    invariant [H_echoMakesSense4] removes(O, N, L, V, Q) -> (Q = eSet | removes(L, L, L, V, Q))
+    invariant [H_echoMakesSense3] adds(O, N, L, V, Q) -> (~(exists N. nset.contains(N, Q)) | adds(L, L, L, V, Q))
+    invariant [H_echoMakesSense4] removes(O, N, L, V, Q) -> (~(exists N. nset.contains(N, Q)) | removes(L, L, L, V, Q))
     invariant [H_echoMakesSense5] num_changes(O, N, L) <= num_changes(N, N, L) & (num_changes(N, N, L)>count.first -> num_changes(N, N, L) <= num_changes(L, L, L))
     invariant [H_echoMakesSense6] num_committed(O, N, L) <= num_committed(N, N, L) & (num_committed(O, N, L)>count.first -> num_committed(O, N, L) <= num_committed(L, L, L))
     invariant [H_echoMakesSense7] ragged_trim_computed(O, N, L, V) -> (ragged_trim_computed(N, N, L, V) & ragged_trim_computed(L, L, L, V))
@@ -1287,12 +1275,9 @@ isolate leaderVC = {
                                                                                                               -> ragged_trim_computed(L, N, N1, V)))
     invariant [H_leaderCommittedTrimFirst] forall N:replica. (~suspected(N, N, N, V) & leader(N, L, V) & ragged_trim_committed(N, N, L, V))
                               -> ragged_trim_committed(N, L, L, V)
-    invariant [S_nextViewAfterAllCommit] (viewSeq(V1, V2) & isActive(V1) & isActive(V2) & nset.contains(N, members(V1)) & leader(N, L, V1) & ~suspected(L, L, N, V1))
-                              -> num_committed(N, N, L) >= vn(V1)
-    invariant [S_nextViewAfterAllTrim] (viewSeq(V1, V2) & isActive(V1) & isActive(V2) & nset.contains(N, members(V1)) & leader(N1, L, V1)  & ~suspected(L, L, N1, V1))
-                              -> ragged_trim_committed(N, N, L, V1)
-    invariant [H_addOrRemove] ((num_changes(O, N, L) >= K & K > count.first) & vn(V)=K & adds(O, N, L, V, A) & removes(O, N, L, V, R)) ->
-                              (exists M. nset.contains(M, A) | nset.contains(M, R))
+    invariant [H_leaderNotSuspected] (isActive(V) & nset.contains(N, members(V)) & leader(N, L, V) & ~suspected(N, N, N, V)) -> ~suspected(N, N, L, V)
+    #invariant [S_nextViewAfterAllCommit] ~V=view.first -> ((isActive(V) & nset.contains(N, members(V)))) -> ((exists L. (num_committed(N, N, L) >= vn(V))) | suspected(N, N, N, V))
+    #invariant [S_nextViewAfterAllTrim] ~V=view.first -> ((isActive(V) & nset.contains(N, members(V)))) -> ((exists L. (ragged_trim_committed(N, N, L, V))) | suspected(N, N, N, V))
     invariant [H_transitiveSuspicion] suspected(N, F, F, V) -> suspected(N, N, F, V)
     invariant [H_commit_decision_implies_membership] copied_a_commit_decision(N, S, V) -> (nset.contains(S, members(V)) & nset.contains(N, members(V)))
     invariant [H_gotCommitSomewhere] ragged_trim_committed(N, N, L, V) -> ((wasLeader(L, V) & made_a_commit_decision(L, V)))
