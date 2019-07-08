@@ -801,7 +801,7 @@ isolate leaderVC = {
         assume forall N1,L,N2. (~N1=l & ragged_trim_committed(N1, N1, L, v)) -> (min_last_rcvd(l, l, l, N2, v) = min_last_rcvd(N1, N1, L, N2, v));
         ragged_trim_committed(l, l, l, v) := true;
         made_a_commit_decision(l, v) := true;
-        if(~ (forall N1,L,N2. (~N1=l & ragged_trim_committed(N1, N1, L, v)) -> (min_last_rcvd(l, l, l, N2, v) = min_last_rcvd(N1, N1, L, N2, v))) ) { assert_failed_1 := true; }
+        if(~ (forall N1,L,N2. (~N1=l & ragged_trim_committed(N1, N1, L, v)) -> (min_last_rcvd(l, l, l, N2, v) = min_last_rcvd(N1, N1, L, N2, v))) ) { assert_failed_1 := true; };
     }
 
     # When moving from ov to v, we apply changes (by removing some processes from ov, and adding some new ones).  
@@ -1234,8 +1234,10 @@ isolate leaderVC = {
     invariant [H_leaderCommittedTrimFirst] forall N:replica. (~suspected(N, N, N, V) & leader(N, L, V) & ragged_trim_committed(N, N, L, V))
                               -> ragged_trim_committed(N, L, L, V)
     invariant [H_leaderNotSuspected] (isActive(V) & nset.contains(N, members(V)) & leader(N, L, V) & ~suspected(N, N, N, V)) -> ~suspected(N, N, L, V)
-    #invariant [S_nextViewAfterAllCommit] ~V=view.first -> ((isActive(V) & nset.contains(N, members(V)))) -> ((exists L. (num_committed(N, N, L) >= vn(V))) | suspected(N, N, N, V))
-    #invariant [S_nextViewAfterAllTrim] ~V=view.first -> ((isActive(V) & nset.contains(N, members(V)))) -> ((exists L. (ragged_trim_committed(N, N, L, V))) | suspected(N, N, N, V))
+    invariant [S_nextViewAfterAllCommit_same_adds] isFinal(V) -> (num_committed(N1, N1, L) >= vn(V) & num_committed(N2, N2, L) >= vn(V) & adds(O,N1,L,V,A)=adds(O,N2,L,V,A))
+    invariant [S_nextViewAfterAllCommit_same_removes] isFinal(V) -> (num_committed(N1, N1, L) >= vn(V) & num_committed(N2, N2, L) >= vn(V) & removes(O,N1,L,V,R)=removes(O,N2,L,V,R))
+    invariant [S_nextViewAfterAllTrim] (isFinal(V) & nset.contains(N1, members(V)) & ragged_trim_committed(N1, N1, L, V) & ~ragged_trim_committed(N2, N2, L, V)) -> 
+                              (~nset.contains(N2, members(V)) | suspected(N2, N2, N2, V))
     invariant [H_transitiveSuspicion] suspected(N, F, F, V) -> suspected(N, N, F, V)
     invariant [H_commit_decision_implies_membership] copied_a_commit_decision(N, S, V) -> (nset.contains(S, members(V)) & nset.contains(N, members(V)))
     invariant [H_gotCommitSomewhere] ragged_trim_committed(N, N, L, V) -> ((wasLeader(L, V) & made_a_commit_decision(L, V)))
